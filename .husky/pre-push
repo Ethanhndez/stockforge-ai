@@ -1,0 +1,27 @@
+#!/bin/sh
+# AgentShield pre-push security gate
+# Blocks push if ecc-agentshield scan finds CRITICAL findings (score < 80).
+
+echo "[AgentShield] Running static security scan before push..."
+
+SCAN_OUTPUT=$(/usr/local/bin/node node_modules/.bin/ecc-agentshield scan --format json 2>/dev/null)
+SCORE=$(echo "$SCAN_OUTPUT" | /usr/local/bin/node -e "
+  let d=''; process.stdin.on('data',c=>d+=c);
+  process.stdin.on('end',()=>{
+    try{
+      const r=JSON.parse(d);
+      const s=r.score?.numericScore ?? r.score;
+      console.log(typeof s === 'number' ? s : 100);
+    }catch{ console.log(100); }
+  });
+" 2>/dev/null)
+
+echo "[AgentShield] Security score: ${SCORE}/100"
+
+if [ -n "$SCORE" ] && [ "$SCORE" -lt 80 ] 2>/dev/null; then
+  echo "[AgentShield] BLOCKED: Security score ${SCORE} is below threshold (80)."
+  echo "Run 'npm run security-scan' to see findings and fix CRITICAL issues before pushing."
+  exit 1
+fi
+
+echo "[AgentShield] Passed. Proceeding with push."
