@@ -593,6 +593,26 @@ Use your research tools to gather real data, then return a JSON object with this
 
         send({ type: 'progress', step: 'Synthesizing research summary…', iteration: iterations + 1 })
 
+        // ── Force synthesis if loop exited while Claude still wanted tools ──
+        // This happens when MAX_ITERATIONS is hit but Claude hasn't written text yet.
+        // Re-call without the tools array so Claude can only respond with text.
+        if (response.stop_reason === 'tool_use') {
+          messages.push({ role: 'assistant', content: response.content })
+          messages.push({
+            role: 'user',
+            content:
+              'You have gathered sufficient data. Now write your complete research analysis ' +
+              'in the exact JSON format specified in the original request. Do not call any more tools.',
+          })
+          response = await anthropic.messages.create({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 8000,
+            system: SYSTEM_PROMPT,
+            // Omit tools — forces a text-only response
+            messages,
+          })
+        }
+
         const fetchedAt = new Date().toISOString()
 
         // ── Extract and parse final JSON ───────────────────

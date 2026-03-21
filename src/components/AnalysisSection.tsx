@@ -137,6 +137,11 @@ export default function AnalysisSection({ ticker }: { ticker: string }) {
     const interval = setInterval(() => setElapsed((e) => e + 1), 1000)
 
     async function streamAnalysis() {
+      // Track whether a 'complete' or 'error' event was received.
+      // Cannot use the loading React state here — closures capture the
+      // initial value (true) and React state updates don't mutate it.
+      let completed = false
+
       try {
         const res = await fetch('/api/analysis', {
           method: 'POST',
@@ -188,10 +193,12 @@ export default function AnalysisSection({ ticker }: { ticker: string }) {
               if (event.type === 'progress') {
                 setLiveSteps((prev) => [...prev, event.step as string])
               } else if (event.type === 'complete') {
+                completed = true
                 setAnalysis(event.analysis as Analysis)
                 setLoading(false)
                 clearInterval(interval)
               } else if (event.type === 'error') {
+                completed = true
                 setError(event.error as string)
                 setLoading(false)
                 clearInterval(interval)
@@ -202,8 +209,8 @@ export default function AnalysisSection({ ticker }: { ticker: string }) {
           }
         }
 
-        // Stream closed without a 'complete' event
-        if (loading) {
+        // Stream closed without a 'complete' or 'error' event
+        if (!completed) {
           setError('Analysis stream closed unexpectedly. Please try again.')
           setLoading(false)
           clearInterval(interval)
