@@ -101,6 +101,22 @@ const tools: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'getFinancials',
+    description:
+      'Fetch annual financial statement data from Polygon.io /vX/reference/financials. ' +
+      'Returns income statement (revenue, net income, operating income, diluted EPS), ' +
+      'balance sheet (total assets, long-term debt, cash), and cash flow data. ' +
+      'Call this AFTER getFundamentals to populate the Financial Snapshot section. ' +
+      'Any field not returned must be recorded as a data_gap — never estimate.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        ticker: { type: 'string', description: 'Stock ticker symbol' },
+      },
+      required: ['ticker'],
+    },
+  },
+  {
     name: 'compareStocks',
     description:
       'Fetch quote, profile, and fundamentals for two tickers in parallel for ' +
@@ -205,13 +221,111 @@ async function getFundamentals(ticker: string) {
 }
 
 /**
+ * getFinancials
+ * Fetches annual income statement + balance sheet data from Polygon.io
+ * /vX/reference/financials endpoint. This is the ONLY Polygon endpoint
+ * that returns revenue, net income, EPS, total assets, and debt figures.
+ * Returns null for any field not present — never estimates.
+ */
+async function getFinancials(ticker: string) {
+  try {
+    const res = await fetch(
+      `https://api.polygon.io/vX/reference/financials?ticker=${encodeURIComponent(ticker)}&timeframe=annual&limit=1&apiKey=${POLYGON_API_KEY}`
+    )
+    if (!res.ok) {
+      return {
+        error: `Polygon Financials returned HTTP ${res.status} for ${ticker}`,
+        ticker,
+      }
+    }
+
+    const data = await res.json()
+    const result = data.results?.[0]
+
+    if (!result) {
+      return {
+        error: `No annual financial data found for ${ticker} on Polygon.io`,
+        ticker,
+      }
+    }
+
+    // Helper: safely extract a numeric value from a Polygon financials field object
+    // Polygon returns fields as { value: number, unit: string } or undefined
+    const val = (obj: Record<string, unknown> | undefined): number | null =>
+      obj && typeof obj.value === 'number' ? obj.value : null
+
+    const income  = (result.financials?.income_statement  ?? {}) as Record<string, unknown>
+    const balance = (result.financials?.balance_sheet      ?? {}) as Record<string, unknown>
+    const cf      = (result.financials?.cash_flow_statement ?? {}) as Record<string, unknown>
+
+    const revenue   = val(income.revenues as Record<string, unknown>)
+    const netIncome = val(income.net_income_loss as Record<string, unknown>)
+    const opIncome  = val(income.operating_income_loss as Record<string, unknown>)
+    const dilutedEPS = val(income.diluted_earnings_per_share as Record<string, unknown>)
+
+    const totalAssets = val(balance.assets as Record<string, unknown>)
+    // Polygon balance sheet uses 'long_term_debt' or noncurrent_liabilities breakdown
+    const longTermDebt = val(
+      (balance.long_term_debt ?? balance.noncurrent_liabilities) as Record<string, unknown>
+    )
+    // Cash: prefer the combined cash + short-term investments field
+    const cash = val(
+      (balance.cash_and_cash_equivalents_including_short_term_investments ??
+       balance.cash_and_cash_equivalents) as Record<string, unknown>
+    )
+    const operatingCashFlow = val(
+      cf.net_cash_flow_from_operating_activities as Record<string, unknown>
+    )
+
+    const operatingMargin =
+      revenue && opIncome ? ((opIncome / revenue) * 100).toFixed(1) + '%' : null
+
+    const fmt = (n: number | null, unit = 'USD'): string | null => {
+      if (n === null) return null
+      if (unit === 'USD') {
+        if (Math.abs(n) >= 1e12) return `$${(n / 1e12).toFixed(2)}T`
+        if (Math.abs(n) >= 1e9)  return `$${(n / 1e9).toFixed(2)}B`
+        if (Math.abs(n) >= 1e6)  return `$${(n / 1e6).toFixed(2)}M`
+        return `$${n.toLocaleString()}`
+      }
+      return String(n)
+    }
+
+    return {
+      ticker,
+      fiscalYear: result.fiscal_year ?? null,
+      fiscalPeriod: result.fiscal_period ?? null,
+      filingDate: result.filing_date ?? null,
+      // Formatted strings for Claude to use directly in the report
+      revenue:          fmt(revenue),
+      netIncome:        fmt(netIncome),
+      operatingIncome:  fmt(opIncome),
+      operatingMargin,
+      totalAssets:      fmt(totalAssets),
+      longTermDebt:     fmt(longTermDebt),
+      cash:             fmt(cash),
+      operatingCashFlow: fmt(operatingCashFlow),
+      dilutedEPS:       dilutedEPS !== null ? `$${dilutedEPS.toFixed(2)}` : null,
+      // Raw numbers for P/E calculation: currentPrice / dilutedEPS
+      dilutedEPSRaw:    dilutedEPS,
+      fetchedAt: new Date().toISOString(),
+    }
+  } catch (e) {
+    return { error: `Financials fetch failed: ${String(e)}`, ticker }
+  }
+}
+
+/**
  * get_recent_filings
  * Gets filing history from SEC EDGAR submissions API.
  */
 async function getRecentFilings(cik: string) {
   try {
+    // SEC EDGAR submissions URL requires the "CIK" prefix before the zero-padded number.
+    // Correct: https://data.sec.gov/submissions/CIK0000320193.json
+    // Wrong:   https://data.sec.gov/submissions/0000320193.json  ← returns 404
     const res = await fetch(
-      `https://data.sec.gov/submissions/${cik}.json`,
+      `https://data.sec.gov/submissions/CIK${cik}.json`,
       { headers: SEC_HEADERS }
     )
     if (!res.ok) return { error: `SEC returned HTTP ${res.status}` }
@@ -353,6 +467,8 @@ async function executeTool(
       return getCompanyProfile(input.ticker)
     case 'getFundamentals':
       return getFundamentals(input.ticker)
+    case 'getFinancials':
+      return getFinancials(input.ticker)
     case 'get_recent_filings':
       return getRecentFilings(input.cik)
     case 'getNews':
@@ -373,9 +489,13 @@ async function executeTool(
 const SYSTEM_PROMPT = `You are a financial research assistant for StockForge AI. Your role is to produce structured research intelligence — not investment advice. Rules you must follow without exception: (1) Only use data returned by tools. Never speculate about prices, performance, or outcomes using your training knowledge. (2) If a tool returns missing or empty data, say 'data unavailable' explicitly — never fill the gap. (3) Never give buy, sell, or hold recommendations in any form or phrasing. (4) Always present both a bull case and a bear case. A response that only validates one direction must be regenerated. (5) Every factual claim must be attributable to a specific Polygon.io data source. An empty data_sources array is a bug.
 
 YOUR RESEARCH PROCESS:
-1. First call getCompanyProfile to get the SEC CIK number
-2. Then call: getFundamentals, get_recent_filings, getNews, and getQuote
-3. After gathering all data, synthesize everything into your structured research output
+1. Call getCompanyProfile to get the SEC CIK number and company metadata
+2. Call getFundamentals for market cap, employees, sector, and company description
+3. Call getFinancials for income statement and balance sheet data (revenue, net income, EPS, assets, debt, cash) — this is REQUIRED to populate the Financial Snapshot
+4. Call get_recent_filings (using the CIK from step 1) for SEC filing history
+5. Call getNews for recent headlines and sentiment
+6. Call getQuote for the latest price data
+7. After all tools complete, synthesize into the structured JSON output
 
 YOUR ANALYSIS STANDARDS:
 - Always cite SPECIFIC numbers from the actual data you retrieved (e.g., "$394.3B revenue in FY2023")
@@ -457,14 +577,14 @@ Use your research tools to gather real data, then return a JSON object with this
   "analystBrief": "Dense technical paragraph for institutional investors. Reference specific revenue figures, margins, growth rates, and competitive dynamics from the data you retrieved.",
   "industryContext": "1-2 sentences on the industry, where it's heading, and this company's competitive position.",
   "financialSnapshot": {
-    "revenue": "e.g. $394.3B (FY2023)",
-    "netIncome": "e.g. $97.0B (FY2023)",
-    "operatingMargin": "e.g. 29.8%",
-    "totalAssets": "e.g. $352.6B",
-    "debtLoad": "Plain English assessment of debt. E.g. 'Net cash positive with $165B cash vs $110B long-term debt'",
-    "cashPosition": "e.g. $165.6B",
-    "revenueGrowthNote": "e.g. 'Revenue was roughly flat YoY after a high-growth era' or 'not available'",
-    "epsNote": "e.g. 'Diluted EPS of $6.13 (FY2023)' or 'not available'"
+    "revenue": "Use the revenue field from getFinancials (e.g. '$391.04B (FY2024)'). If null, write 'data unavailable — Polygon.io financials endpoint'",
+    "netIncome": "Use the netIncome field from getFinancials (e.g. '$93.74B (FY2024)'). If null, write 'data unavailable'",
+    "operatingMargin": "Use the operatingMargin field from getFinancials (e.g. '31.5%'). If null, write 'data unavailable'",
+    "totalAssets": "Use the totalAssets field from getFinancials (e.g. '$364.98B'). If null, write 'data unavailable'",
+    "debtLoad": "Use longTermDebt and cash from getFinancials to write a plain English debt assessment (e.g. 'Net cash positive — $65.2B cash vs $91.8B long-term debt'). If data unavailable, say so explicitly.",
+    "cashPosition": "Use the cash field from getFinancials. If null, write 'data unavailable'",
+    "revenueGrowthNote": "Comment on YoY revenue trend if inferable from news or filings, otherwise 'not available from retrieved data'",
+    "epsNote": "Use dilutedEPS from getFinancials (e.g. 'Diluted EPS $6.08 (FY2024)'). Then calculate P/E: divide the getQuote closing price by dilutedEPSRaw. E.g. 'P/E ~40.8x (calculated: $247.99 / $6.08)'. If EPS is null, write 'EPS data unavailable from Polygon.io financials endpoint'"
   },
   "bullCase": {
     "headline": "Short catchy title (e.g. 'The Ecosystem Flywheel')",
@@ -592,6 +712,26 @@ Use your research tools to gather real data, then return a JSON object with this
         }
 
         send({ type: 'progress', step: 'Synthesizing research summary…', iteration: iterations + 1 })
+
+        // ── Force synthesis if loop exited while Claude still wanted tools ──
+        // This happens when MAX_ITERATIONS is hit but Claude hasn't written text yet.
+        // Re-call without the tools array so Claude can only respond with text.
+        if (response.stop_reason === 'tool_use') {
+          messages.push({ role: 'assistant', content: response.content })
+          messages.push({
+            role: 'user',
+            content:
+              'You have gathered sufficient data. Now write your complete research analysis ' +
+              'in the exact JSON format specified in the original request. Do not call any more tools.',
+          })
+          response = await anthropic.messages.create({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 8000,
+            system: SYSTEM_PROMPT,
+            // Omit tools — forces a text-only response
+            messages,
+          })
+        }
 
         const fetchedAt = new Date().toISOString()
 
