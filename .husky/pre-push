@@ -4,9 +4,9 @@
 
 echo "[AgentShield] Running static security scan before push..."
 
-NVM_NODE="$HOME/.nvm/versions/node/v20.20.1/bin/node"
-NVM_AGENTSHIELD="$HOME/.nvm/versions/node/v20.20.1/bin/ecc-agentshield"
-SCAN_OUTPUT=$("$NVM_NODE" "$NVM_AGENTSHIELD" scan --format json 2>/dev/null)
+NVM_NODE="/Users/ethanhernandez/.nvm/versions/node/v20.20.1/bin/node"
+NVM_AGENTSHIELD="/Users/ethanhernandez/.nvm/versions/node/v20.20.1/bin/agentshield"
+SCAN_OUTPUT=$("$NVM_AGENTSHIELD" scan --format json 2>/dev/null)
 SCORE=$(echo "$SCAN_OUTPUT" | "$NVM_NODE" -e "
   let d=''; process.stdin.on('data',c=>d+=c);
   process.stdin.on('end',()=>{
