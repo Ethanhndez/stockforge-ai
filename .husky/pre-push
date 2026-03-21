@@ -4,10 +4,11 @@
 
 echo "[AgentShield] Running static security scan before push..."
 
-NVM_NODE="/Users/ethanhernandez/.nvm/versions/node/v20.20.1/bin/node"
-NVM_AGENTSHIELD="/Users/ethanhernandez/.nvm/versions/node/v20.20.1/bin/agentshield"
-SCAN_OUTPUT=$("$NVM_AGENTSHIELD" scan --format json 2>/dev/null)
-SCORE=$(echo "$SCAN_OUTPUT" | "$NVM_NODE" -e "
+# Prepend nvm node to PATH so the agentshield shebang (#!/usr/bin/env node) resolves
+export PATH="/Users/ethanhernandez/.nvm/versions/node/v20.20.1/bin:$PATH"
+
+SCAN_OUTPUT=$(agentshield scan --format json 2>/dev/null)
+SCORE=$(echo "$SCAN_OUTPUT" | node -e "
   let d=''; process.stdin.on('data',c=>d+=c);
   process.stdin.on('end',()=>{
     try{

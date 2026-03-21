@@ -1,1 +1,4 @@
-/Users/ethanhernandez/.nvm/versions/node/v20.20.1/bin/node node_modules/.bin/tsc --noEmit
+#!/bin/sh
+# Prepend nvm node to PATH so tsc can run
+export PATH="/Users/ethanhernandez/.nvm/versions/node/v20.20.1/bin:$PATH"
+node node_modules/.bin/tsc --noEmit
