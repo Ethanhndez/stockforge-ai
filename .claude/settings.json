@@ -1,0 +1,50 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run*)",
+      "Bash(npx ecc-agentshield*)",
+      "Bash(git status)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(git push)",
+      "Bash(node .claude/hooks/anti-hallucination-gate.js)",
+      "Bash(node .claude/hooks/agentshield-gate.js)"
+    ],
+    "deny": [
+      "Bash(rm -rf*)",
+      "Bash(curl* | bash*)",
+      "Bash(wget* | sh*)",
+      "Bash(chmod 777*)",
+      "Bash(sudo*)",
+      "Bash(ssh *)",
+      "Bash(ssh-keygen *)",
+      "Bash(* > /dev/*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/anti-hallucination-gate.js"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/agentshield-gate.js"
+          }
+        ]
+      }
+    ]
+  }
+}
