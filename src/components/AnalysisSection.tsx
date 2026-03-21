@@ -117,7 +117,12 @@ function LoadingState({ steps, elapsed }: LoadingStateProps) {
         })}
       </div>
 
-      <p style={styles.elapsed}>{elapsed}s elapsed · PhD-level analysis takes 20–40s</p>
+      <p style={styles.elapsed}>
+        {elapsed}s elapsed ·{' '}
+        {elapsed >= 45
+          ? 'Still working — SEC filings can take longer for some tickers…'
+          : 'PhD-level analysis takes 45–90s'}
+      </p>
     </div>
   )
 }
@@ -129,7 +134,7 @@ export default function AnalysisSection({ ticker }: { ticker: string }) {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   // SSE-driven live steps — each entry is a step label as it arrives
-  const [liveSteps, setLiveSteps] = useState<string[]>(['Starting AI research agent…'])
+  const [liveSteps, setLiveSteps] = useState<string[]>([])
   const [elapsed, setElapsed] = useState(0)
 
   useEffect(() => {

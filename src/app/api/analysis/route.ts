@@ -268,11 +268,14 @@ async function getFinancials(ticker: string) {
     const longTermDebt = val(
       (balance.long_term_debt ?? balance.noncurrent_liabilities) as Record<string, unknown>
     )
-    // Cash: prefer the combined cash + short-term investments field
+    // Cash: try field names in priority order (first non-null wins)
+    console.log('[getFinancials] raw balance_sheet keys:', Object.keys(result?.financials?.balance_sheet ?? {}))
     const cash = val(
-      (balance.cash_and_cash_equivalents_including_short_term_investments ??
-       balance.cash_and_cash_equivalents) as Record<string, unknown>
-    )
+      (balance.cash_and_cash_equivalents_and_short_term_investments ??
+       balance.cash_and_cash_equivalents_including_short_term_investments ??
+       balance.cash_and_cash_equivalents ??
+       balance.current_assets) as Record<string, unknown>
+    ) ?? null
     const operatingCashFlow = val(
       cf.net_cash_flow_from_operating_activities as Record<string, unknown>
     )
@@ -523,6 +526,7 @@ OUTPUT FORMAT:
 const TOOL_LABELS: Record<string, string> = {
   getCompanyProfile:  'Looking up company in SEC EDGAR…',
   getFundamentals:    'Pulling fundamentals from Polygon.io…',
+  getFinancials:      'Loading financial statements…',
   get_recent_filings: 'Reading 10-K & 10-Q SEC filings…',
   getNews:            'Scanning recent news & sentiment…',
   getQuote:           'Fetching live price data…',
