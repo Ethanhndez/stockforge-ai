@@ -523,6 +523,7 @@ OUTPUT FORMAT:
 const TOOL_LABELS: Record<string, string> = {
   getCompanyProfile:  'Looking up company in SEC EDGAR…',
   getFundamentals:    'Pulling fundamentals from Polygon.io…',
+  getFinancials:      'Loading financial statements…',
   get_recent_filings: 'Reading 10-K & 10-Q SEC filings…',
   getNews:            'Scanning recent news & sentiment…',
   getQuote:           'Fetching live price data…',
