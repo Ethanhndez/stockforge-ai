@@ -2,6 +2,21 @@
 /**
  * AgentShield gate — PostToolUse hook
  *
+ * RUNTIME PROTECTION (this file):
+ *   Scans live tool responses during Claude Code sessions for leaked secrets and PII.
+ *   Triggered automatically via the PostToolUse hook in .claude/settings.json.
+ *
+ * STATIC / CI ANALYSIS (ecc-agentshield package):
+ *   `ecc-agentshield` (npm package by Affaan Mustafa) handles static analysis of the
+ *   .claude/ directory — settings, hooks, MCP config, and permissions — as a CI gate.
+ *   Run via: `npm run security-scan`
+ *   Wired into: .husky/pre-push (blocks push when score < 80)
+ *   Baseline: .claude/security/agentshield-baseline.json
+ *
+ * This hook handles RUNTIME tool response scanning.
+ * ecc-agentshield handles STATIC/CI analysis.
+ * Both layers are required; neither replaces the other.
+ *
  * Reads the tool result from stdin and checks for:
  *   1. Leaked API keys in the response payload
  *   2. Unexpected PII fields
@@ -12,15 +27,26 @@
  *   2 — block with explanation on stderr
  */
 
-// Patterns that should never appear in a tool response surfaced to the user
+// Patterns that should never appear in a tool response surfaced to the user.
+//
+// Design rule: every pattern must match a KEY=VALUE pair where VALUE is a
+// plausible secret (20+ alphanumeric chars). This prevents false positives on:
+//   - Variable names:  POLYGON_API_KEY  (no value attached)
+//   - Feature flags:   NEXT_PUBLIC_USE_FIXTURES=true  (value too short)
+//   - Long identifiers near "apiKey" in source code URLs
+//   - Env var references: apiKey=${POLYGON_API_KEY}  ("${" breaks alphanumeric)
 const SENSITIVE_PATTERNS = [
-  // API key shapes
-  /[a-zA-Z0-9_]{20,}\b.*api[_-]?key/i,
-  /polygon[_-]?api[_-]?key\s*[:=]\s*["']?[a-zA-Z0-9]+/i,
-  /NEXT_PUBLIC_[A-Z_]+\s*[:=]\s*["']?[a-zA-Z0-9]+/,
-  // Supabase service role key shape
-  // Pattern is split to prevent self-match when this file is read as a tool response
-  new RegExp('service' + '_role', 'i'),
+  // API key with actual value — key name followed by = or : then 20+ char secret
+  /api[_-]?key\s*[:=]\s*["']?[A-Za-z0-9_\-]{20,}/i,
+  // Polygon-specific key with actual value
+  /polygon[_-]?api[_-]?key\s*[:=]\s*["']?[a-zA-Z0-9]{20,}/i,
+  // NEXT_PUBLIC_ env var with actual value (not a short flag like =true or =false)
+  /NEXT_PUBLIC_[A-Z_]+\s*[:=]\s*["']?[a-zA-Z0-9]{20,}/,
+  // Supabase service role key with actual value — must be KEY=VALUE with 20+ char secret.
+  // Split string prevents self-match when this source file is scanned.
+  // Matches:  service_role_key=eyJhbGc...  or  SERVICE_ROLE_KEY: "sb_secret_abc..."
+  // Does NOT match: SUPABASE_SERVICE_ROLE_KEY (bare env var name, no value)
+  new RegExp('service' + '_role[_a-z]*\\s*[:=]\\s*["\']?[A-Za-z0-9_\\-.]{20,}', 'i'),
   // Generic bearer token in response body
   /"(Authorization|Bearer)"\s*:\s*"[^"]{10,}"/i,
 ];
