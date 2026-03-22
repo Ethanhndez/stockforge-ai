@@ -6,6 +6,7 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import { NextRequest, NextResponse } from 'next/server'
+import { getResearchContext } from '@/lib/rag'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY
@@ -486,11 +487,12 @@ async function executeTool(
 }
 
 // ============================================================
-// The System Prompt — defines Claude's analyst persona
+// System Prompt builder — injects RAG research context per request
 // ============================================================
 
-const SYSTEM_PROMPT = `You are a financial research assistant for StockForge AI. Your role is to produce structured research intelligence — not investment advice. Rules you must follow without exception: (1) Only use data returned by tools. Never speculate about prices, performance, or outcomes using your training knowledge. (2) If a tool returns missing or empty data, say 'data unavailable' explicitly — never fill the gap. (3) Never give buy, sell, or hold recommendations in any form or phrasing. (4) Always present both a bull case and a bear case. A response that only validates one direction must be regenerated. (5) Every factual claim must be attributable to a specific Polygon.io data source. An empty data_sources array is a bug.
-
+function buildSystemPrompt(researchContext: string): string {
+  return `You are a financial research assistant for StockForge AI. Your role is to produce structured research intelligence — not investment advice. Rules you must follow without exception: (1) Only use data returned by tools. Never speculate about prices, performance, or outcomes using your training knowledge. (2) If a tool returns missing or empty data, say 'data unavailable' explicitly — never fill the gap. (3) Never give buy, sell, or hold recommendations in any form or phrasing. (4) Always present both a bull case and a bear case. A response that only validates one direction must be regenerated. (5) Every factual claim must be attributable to a specific Polygon.io data source. An empty data_sources array is a bug.
+${researchContext}
 YOUR RESEARCH PROCESS:
 1. Call getCompanyProfile to get the SEC CIK number and company metadata
 2. Call getFundamentals for market cap, employees, sector, and company description
@@ -517,6 +519,7 @@ OUTPUT FORMAT:
 - Do NOT write any sentences before or after the JSON. No "Here is the analysis:", no "I have gathered all data.", nothing.
 - Do NOT wrap in markdown code fences. Do NOT add any commentary.
 - Start your response with '{' and end with '}'. That is all.`
+}
 
 // ============================================================
 // SSE event helpers
@@ -632,6 +635,14 @@ Use your research tools to gather real data, then return a JSON object with this
   }
 }`
 
+  // ── Fetch RAG research context before streaming ───────────
+  // Fails gracefully — empty string if OpenAI/Supabase unavailable
+  const researchContext = await getResearchContext(
+    `stock analysis ${ticker} investment research fundamentals risk`,
+    { matchThreshold: 0.65, matchCount: 4 }
+  )
+  const systemPrompt = buildSystemPrompt(researchContext)
+
   // ── SSE streaming response ────────────────────────────────
   const stream = new ReadableStream({
     async start(controller) {
@@ -648,7 +659,7 @@ Use your research tools to gather real data, then return a JSON object with this
         let response = await anthropic.messages.create({
           model: 'claude-sonnet-4-6',
           max_tokens: 8000,
-          system: SYSTEM_PROMPT,
+          system: systemPrompt,
           tools,
           messages,
         })
@@ -709,7 +720,7 @@ Use your research tools to gather real data, then return a JSON object with this
           response = await anthropic.messages.create({
             model: 'claude-sonnet-4-6',
             max_tokens: 8000,
-            system: SYSTEM_PROMPT,
+            system: systemPrompt,
             tools,
             messages,
           })
@@ -731,7 +742,7 @@ Use your research tools to gather real data, then return a JSON object with this
           response = await anthropic.messages.create({
             model: 'claude-sonnet-4-6',
             max_tokens: 8000,
-            system: SYSTEM_PROMPT,
+            system: systemPrompt,
             // Omit tools — forces a text-only response
             messages,
           })
