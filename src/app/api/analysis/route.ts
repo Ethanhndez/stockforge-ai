@@ -6,10 +6,86 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import { NextRequest, NextResponse } from 'next/server'
+import { analyzeStock } from '@/lib/ai/agentOrchestrator'
+import { buildStockContext } from '@/lib/ai/contextBuilder'
 import { getResearchContext } from '@/lib/rag'
+import path from 'path'
+import fs from 'fs'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY
+
+const FIXTURE_COMPANIES: Record<string, {
+  companyName: string
+  description: string
+  industryContext: string
+  price: number
+}> = {
+  AAPL: {
+    companyName: 'Apple Inc.',
+    description: 'Apple designs consumer electronics, software, and services across a tightly integrated hardware-software ecosystem.',
+    industryContext: 'Consumer electronics and digital services face a maturing upgrade cycle, with monetization increasingly driven by ecosystem lock-in and recurring services.',
+    price: 227.48,
+  },
+  NVDA: {
+    companyName: 'NVIDIA Corporation',
+    description: 'NVIDIA designs GPUs, AI accelerators, and data-center platforms used across training, inference, gaming, and high-performance computing.',
+    industryContext: 'Semiconductor demand is increasingly driven by AI infrastructure spending, cloud capex cycles, and competition around accelerator performance and supply.',
+    price: 912.35,
+  },
+  TSLA: {
+    companyName: 'Tesla, Inc.',
+    description: 'Tesla manufactures electric vehicles, battery systems, and energy products while positioning software and autonomy as long-term margin drivers.',
+    industryContext: 'Electric vehicle adoption remains sensitive to pricing, rates, subsidies, and manufacturing efficiency, with margin pressure rising as competition intensifies.',
+    price: 176.82,
+  },
+  MSFT: {
+    companyName: 'Microsoft Corporation',
+    description: 'Microsoft sells enterprise software, cloud infrastructure, developer tools, and productivity products with Azure and Copilot central to current growth.',
+    industryContext: 'Enterprise software and cloud markets remain anchored by recurring revenue, vendor lock-in, and AI monetization across installed customer bases.',
+    price: 438.62,
+  },
+  AMZN: {
+    companyName: 'Amazon.com, Inc.',
+    description: 'Amazon operates global e-commerce, cloud infrastructure, logistics, advertising, and subscription businesses with AWS and ads driving profitability.',
+    industryContext: 'E-commerce and cloud remain scale markets where logistics efficiency, cloud optimization trends, and advertising monetization heavily influence profitability.',
+    price: 182.14,
+  },
+}
+
+interface SecRecentFilings {
+  form?: string[]
+  filingDate?: string[]
+  reportDate?: string[]
+  primaryDocDescription?: string[]
+  accessionNumber?: string[]
+}
+
+interface FilingSummary {
+  form: string
+  filingDate: string
+  reportDate: string
+  description: string
+  accessionNumber: string
+}
+
+interface PolygonNewsArticle {
+  title: string
+  published_utc: string
+  description?: string
+  publisher?: {
+    name?: string
+  }
+  insights?: Array<{
+    sentiment?: string
+    sentiment_reasoning?: string
+  }>
+}
+
+interface EdgarIndexItem {
+  name?: string
+  type?: string
+}
 
 // ── SEC EDGAR requires a User-Agent header or it blocks you ──
 const SEC_HEADERS = {
@@ -129,6 +205,28 @@ const tools: Anthropic.Tool[] = [
         tickerB: { type: 'string', description: 'Second ticker symbol' },
       },
       required: ['tickerA', 'tickerB'],
+    },
+  },
+  {
+    name: 'getFilingContent',
+    description:
+      'Fetches the actual text content of an SEC EDGAR filing given a CIK and accession number. ' +
+      'Use this after get_recent_filings returns accession numbers to read 10-Q financial line items or 8-K event disclosures. ' +
+      'Returns the first 8,000 characters of the primary document.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        cik: {
+          type: 'string',
+          description: 'The company CIK number, zero-padded to 10 digits. Example: 0000320193',
+        },
+        accessionNumber: {
+          type: 'string',
+          description:
+            'The accession number from get_recent_filings, formatted with dashes. Example: 0000320193-25-000123',
+        },
+      },
+      required: ['cik', 'accessionNumber'],
     },
   },
 ]
@@ -269,20 +367,21 @@ async function getFinancials(ticker: string) {
     const longTermDebt = val(
       (balance.long_term_debt ?? balance.noncurrent_liabilities) as Record<string, unknown>
     )
-    // Cash: try field names in priority order (first non-null wins)
-    console.log('[getFinancials] raw balance_sheet keys:', Object.keys(result?.financials?.balance_sheet ?? {}))
+    // Cash: only use explicit cash-equivalent fields. Do not fall back to
+    // broader current assets, which would overstate liquidity.
     const cash = val(
       (balance.cash_and_cash_equivalents_and_short_term_investments ??
        balance.cash_and_cash_equivalents_including_short_term_investments ??
-       balance.cash_and_cash_equivalents ??
-       balance.current_assets) as Record<string, unknown>
+       balance.cash_and_cash_equivalents) as Record<string, unknown>
     ) ?? null
     const operatingCashFlow = val(
       cf.net_cash_flow_from_operating_activities as Record<string, unknown>
     )
 
     const operatingMargin =
-      revenue && opIncome ? ((opIncome / revenue) * 100).toFixed(1) + '%' : null
+      revenue !== null && revenue !== 0 && opIncome !== null
+        ? ((opIncome / revenue) * 100).toFixed(1) + '%'
+        : null
 
     const fmt = (n: number | null, unit = 'USD'): string | null => {
       if (n === null) return null
@@ -335,18 +434,19 @@ async function getRecentFilings(cik: string) {
     if (!res.ok) return { error: `SEC returned HTTP ${res.status}` }
 
     const data = await res.json()
-    const recent = data.filings?.recent
+    const recent = data.filings?.recent as SecRecentFilings | undefined
 
     if (!recent) return { error: 'No recent filing data in SEC EDGAR' }
 
     // Pull last 8 significant filing types
     const targetForms = ['10-K', '10-Q', '8-K', 'DEF 14A', '10-K/A', '10-Q/A']
-    const filings: any[] = []
+    const forms = recent.form ?? []
+    const filings: FilingSummary[] = []
 
-    for (let i = 0; i < (recent.form?.length || 0) && filings.length < 8; i++) {
-      if (targetForms.includes(recent.form[i])) {
+    for (let i = 0; i < forms.length && filings.length < 8; i++) {
+      if (targetForms.includes(forms[i])) {
         filings.push({
-          form: recent.form[i],
+          form: forms[i],
           filingDate: recent.filingDate?.[i] || 'unknown',
           reportDate: recent.reportDate?.[i] || 'unknown',
           description: recent.primaryDocDescription?.[i] || '',
@@ -384,7 +484,7 @@ async function getNews(ticker: string, limit: number) {
 
     const data = await res.json()
 
-    const articles = (data.results || []).map((a: any) => ({
+    const articles = ((data.results as PolygonNewsArticle[] | undefined) ?? []).map((a) => ({
       title: a.title,
       published: a.published_utc,
       publisher: a.publisher?.name || 'Unknown',
@@ -442,6 +542,85 @@ async function getQuote(ticker: string) {
 }
 
 /**
+ * getFilingContent
+ * Two-step EDGAR fetch: index JSON → primary document → stripped text (8k chars).
+ * parseInt(cik) strips leading zeros for the folder path (EDGAR quirk).
+ */
+async function getFilingContent(
+  cik: string,
+  accessionNumber: string
+): Promise<{ content: string; source: string; error?: string }> {
+  const accessionClean = accessionNumber.replace(/-/g, '')
+  const baseUrl = `https://data.sec.gov/Archives/edgar/data/${parseInt(cik, 10)}/${accessionClean}`
+  const indexUrl = `${baseUrl}/${accessionClean}-index.json`
+
+  try {
+    const indexRes = await fetch(indexUrl, { headers: SEC_HEADERS })
+    if (!indexRes.ok) {
+      return { content: '', source: indexUrl, error: `Index fetch failed: ${indexRes.status}` }
+    }
+
+    const index = await indexRes.json() as {
+      directory?: { item?: EdgarIndexItem[] }
+      documents?: Array<{ document?: string; type?: string }>
+    }
+
+    const directoryItems = index.directory?.item ?? []
+    const documentEntries = index.documents ?? []
+
+    const primaryDocFromDocuments =
+      documentEntries.find(
+        (doc) => doc.type && ['10-K', '10-Q', '8-K'].includes(doc.type)
+      )?.document ?? documentEntries[0]?.document
+
+    const primaryDocFromDirectory =
+      directoryItems.find((item) => {
+        const name = item.name?.toLowerCase() ?? ''
+        return (
+          !name.endsWith('-index.html') &&
+          !name.endsWith('-index.htm') &&
+          (name.endsWith('.htm') || name.endsWith('.html') || name.endsWith('.txt'))
+        )
+      })?.name
+
+    const primaryDocument = primaryDocFromDocuments ?? primaryDocFromDirectory
+
+    if (!primaryDocument) {
+      return { content: '', source: indexUrl, error: 'No primary document found in filing index' }
+    }
+
+    const docUrl = `${baseUrl}/${primaryDocument}`
+    const docRes = await fetch(docUrl, { headers: SEC_HEADERS })
+    if (!docRes.ok) {
+      return { content: '', source: docUrl, error: `Document fetch failed: ${docRes.status}` }
+    }
+
+    const rawHtml = await docRes.text()
+
+    const stripped = rawHtml
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+
+    const truncated =
+      stripped.length > 8000
+        ? stripped.slice(0, 8000) + '\n\n[Content truncated at 8,000 characters]'
+        : stripped
+
+    return { content: truncated, source: docUrl }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error'
+    return { content: '', source: indexUrl, error: `getFilingContent failed: ${message}` }
+  }
+}
+
+/**
  * compareStocks
  * Fetches quote and profile for two tickers in parallel for side-by-side comparison.
  */
@@ -481,6 +660,8 @@ async function executeTool(
       return getQuote(input.ticker)
     case 'compareStocks':
       return compareStocks(input.tickerA, input.tickerB)
+    case 'getFilingContent':
+      return getFilingContent(input.cik, input.accessionNumber)
     default:
       return { error: `Unknown tool: ${name}` }
   }
@@ -498,9 +679,10 @@ YOUR RESEARCH PROCESS:
 2. Call getFundamentals for market cap, employees, sector, and company description
 3. Call getFinancials for income statement and balance sheet data (revenue, net income, EPS, assets, debt, cash) — this is REQUIRED to populate the Financial Snapshot
 4. Call get_recent_filings (using the CIK from step 1) for SEC filing history
-5. Call getNews for recent headlines and sentiment
-6. Call getQuote for the latest price data
-7. After all tools complete, synthesize into the structured JSON output
+5. Call getFilingContent on the most recent 10-Q and the most recent 8-K accession numbers from step 4 to retrieve actual financial line items and material event disclosures. Cite the SEC EDGAR document URL as the source for any claims drawn from filing content.
+6. Call getNews for recent headlines and sentiment
+7. Call getQuote for the latest price data
+8. After all tools complete, synthesize into the structured JSON output
 
 YOUR ANALYSIS STANDARDS:
 - Always cite SPECIFIC numbers from the actual data you retrieved (e.g., "$394.3B revenue in FY2023")
@@ -534,10 +716,104 @@ const TOOL_LABELS: Record<string, string> = {
   getNews:            'Scanning recent news & sentiment…',
   getQuote:           'Fetching live price data…',
   compareStocks:      'Fetching comparison data for both tickers…',
+  getFilingContent:   'Reading SEC filing document…',
 }
 
 function sseEvent(data: Record<string, unknown>): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`)
+}
+
+function parseJsonObject<T>(raw: string): T {
+  const stripped = raw
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim()
+
+  const jsonStart = stripped.indexOf('{')
+  const jsonEnd = stripped.lastIndexOf('}')
+
+  if (jsonStart === -1 || jsonEnd === -1 || jsonEnd <= jsonStart) {
+    throw new Error('Claude did not return a JSON object')
+  }
+
+  return JSON.parse(stripped.slice(jsonStart, jsonEnd + 1)) as T
+}
+
+function buildFixtureAnalysis(ticker: string, fixtureAnalysis: Record<string, unknown>) {
+  if (ticker === 'AAPL') {
+    return {
+      ...fixtureAnalysis,
+      analysisDate: new Date().toISOString().split('T')[0],
+      fetchedAt: new Date().toISOString(),
+    }
+  }
+
+  const company = FIXTURE_COMPANIES[ticker]
+  const fetchedAt = new Date().toISOString()
+
+  return {
+    companyName: company.companyName,
+    ticker,
+    analysisDate: new Date().toISOString().split('T')[0],
+    executiveSummary: `${company.companyName} fixture analysis is enabled for local development. ${company.description}`,
+    analystBrief: `Fixture mode is active for ${ticker}, so this report uses deterministic placeholder analysis rather than live market or filing data. The current seeded reference price is $${company.price.toFixed(2)} and the response shape matches production output for UI verification.`,
+    industryContext: company.industryContext,
+    financialSnapshot: {
+      revenue: 'fixture data unavailable',
+      netIncome: 'fixture data unavailable',
+      operatingMargin: 'fixture data unavailable',
+      totalAssets: 'fixture data unavailable',
+      debtLoad: 'Fixture mode does not provide company-specific leverage analysis.',
+      cashPosition: 'fixture data unavailable',
+      revenueGrowthNote: 'Fixture mode does not include live growth data.',
+      epsNote: `Fixture reference price $${company.price.toFixed(2)}. EPS data unavailable in fixture mode.`,
+    },
+    bullCase: {
+      headline: 'Fixture Upside Scenario',
+      points: [
+        `${company.companyName} renders correctly through the full analysis pipeline for ${ticker}.`,
+        'The stock detail page, SSE loader, and research cards all receive structured data in the expected shape.',
+        'Fixture mode confirms the app can render a complete analysis experience without live provider dependencies.',
+      ],
+      plainEnglish: `In fixture mode, the main bullish takeaway is that the product flow for ${ticker} works end-to-end.`,
+    },
+    bearCase: {
+      headline: 'Fixture Limitations',
+      points: [
+        'This is not a live market analysis and should not be interpreted as company-specific research.',
+        'Financial metrics, filing summaries, and news synthesis are intentionally stubbed in fixture mode.',
+        'Real differentiation between companies requires live Polygon.io, SEC EDGAR, and Claude responses.',
+      ],
+      plainEnglish: `The downside is simple: this is a local test fixture, not a real investment analysis for ${ticker}.`,
+    },
+    keyRisks: [
+      'Fixture mode does not reflect live fundamentals or filings.',
+      'Ticker-specific investment conclusions are unavailable in fixture mode.',
+      'Real analysis quality still depends on external API and model availability.',
+    ],
+    recentNewsImpact: `Fixture mode is active, so no live news interpretation is available for ${ticker}.`,
+    earningsQuality: `Fixture mode does not evaluate earnings quality for ${ticker}.`,
+    data_sources: [
+      `Fixture analysis payload for ${ticker}`,
+      `Fixture quote seed for ${ticker} at $${company.price.toFixed(2)}`,
+    ],
+    researchPosture: {
+      bull_case: `UI and backend fixture flow completed successfully for ${ticker}.`,
+      bear_case: `The content is placeholder-only until live providers are enabled for ${ticker}.`,
+      key_risks: [
+        'No live market data in fixture mode',
+        'No live filing reads in fixture mode',
+        'No live model synthesis in fixture mode',
+      ],
+      data_gaps: [
+        'Revenue unavailable in fixture mode',
+        'Net income unavailable in fixture mode',
+        'News and filing detail unavailable in fixture mode',
+      ],
+    },
+    fetchedAt,
+  }
 }
 
 // ============================================================
@@ -570,9 +846,105 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  // ── Build the initial user message ───────────────────────
-  const today = new Date().toISOString().split('T')[0]
-  const userPrompt = `Conduct a comprehensive investment research analysis for ${ticker} as of ${today}.
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return NextResponse.json(
+      { error: 'ANTHROPIC_API_KEY is not configured' },
+      { status: 500 }
+    )
+  }
+
+  if (process.env.NEXT_PUBLIC_USE_FIXTURES === 'true' && !FIXTURE_COMPANIES[ticker]) {
+    return NextResponse.json(
+      { error: `Ticker '${ticker}' not found. Check the symbol and try again.` },
+      { status: 400 }
+    )
+  }
+
+  // ── Fixture mode — streams fake SSE events, no external API calls ──
+  if (process.env.NEXT_PUBLIC_USE_FIXTURES === 'true') {
+    const fixtureDir = path.join(process.cwd(), 'src/lib/fixtures')
+    const fixtureSteps = [
+      { step: 'Looking up company profile…', tool: 'getCompanyProfile' },
+      { step: 'Fetching fundamentals…', tool: 'getFundamentals' },
+      { step: 'Fetching recent SEC filings…', tool: 'get_recent_filings' },
+      { step: 'Reading SEC filing document…', tool: 'getFilingContent' },
+      { step: 'Fetching latest quote…', tool: 'getQuote' },
+      { step: 'Fetching financial statements…', tool: 'getFinancials' },
+      { step: 'Fetching recent news…', tool: 'getNews' },
+      { step: 'Generating research report…', tool: 'synthesis' },
+    ]
+    const stream = new ReadableStream({
+      async start(controller) {
+        const enc = new TextEncoder()
+        const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
+        for (let i = 0; i < fixtureSteps.length; i++) {
+          const { step, tool } = fixtureSteps[i]
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'progress', step, iteration: Math.floor(i / 3) + 1, tool })}\n\n`))
+          await delay(800)
+        }
+        const rawAnalysis = JSON.parse(fs.readFileSync(path.join(fixtureDir, 'aapl-analysis.json'), 'utf-8')) as Record<string, unknown>
+        const analysis = buildFixtureAnalysis(ticker, rawAnalysis)
+        controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'complete', analysis, toolIterations: 3, fetchedAt: new Date().toISOString() })}\n\n`))
+        controller.close()
+      },
+    })
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    })
+  }
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (data: Record<string, unknown>) => {
+        try {
+          controller.enqueue(sseEvent(data))
+        } catch {
+          // Controller already closed (client disconnected mid-stream)
+        }
+      }
+
+      try {
+        send({ type: 'progress', step: 'Building stock context…', iteration: 0 })
+        const context = await buildStockContext(ticker)
+
+        send({ type: 'progress', step: 'Running fundamental agent…', iteration: 1, tool: 'fundamentalAgent' })
+        send({ type: 'progress', step: 'Running technical agent…', iteration: 1, tool: 'technicalAgent' })
+        send({ type: 'progress', step: 'Running sentiment agent…', iteration: 1, tool: 'sentimentAgent' })
+
+        const result = await analyzeStock(ticker, context)
+
+        send({ type: 'progress', step: 'Running synthesis agent…', iteration: 2, tool: 'synthesisAgent' })
+
+        const analysis = parseJsonObject<Record<string, unknown>>(result.synthesis)
+        const fetchedAt = new Date().toISOString()
+
+        send({
+          type: 'complete',
+          analysis,
+          toolIterations: 4,
+          fetchedAt,
+          dataFetchedAt: fetchedAt,
+        })
+
+        controller.close()
+        return
+      } catch (parallelError) {
+        console.error('[/api/analysis] Parallel orchestration failed, falling back:', parallelError)
+        send({
+          type: 'progress',
+          step: 'Parallel agent path failed, switching to legacy analysis…',
+          iteration: 1,
+          fallback: true,
+        })
+      }
+
+      try {
+        const today = new Date().toISOString().split('T')[0]
+        const userPrompt = `Conduct a comprehensive investment research analysis for ${ticker} as of ${today}.
 
 Use your research tools to gather real data, then return a JSON object with this EXACT structure:
 
@@ -635,26 +1007,16 @@ Use your research tools to gather real data, then return a JSON object with this
   }
 }`
 
-  // ── Fetch RAG research context before streaming ───────────
-  // Fails gracefully — empty string if OpenAI/Supabase unavailable
-  const researchContext = await getResearchContext(
-    `stock analysis ${ticker} investment research fundamentals risk`,
-    { matchThreshold: 0.65, matchCount: 4 }
-  )
-  const systemPrompt = buildSystemPrompt(researchContext)
-
-  // ── SSE streaming response ────────────────────────────────
-  const stream = new ReadableStream({
-    async start(controller) {
-      const send = (data: Record<string, unknown>) =>
-        controller.enqueue(sseEvent(data))
-
-      try {
+        const researchContext = await getResearchContext(
+          `stock analysis ${ticker} investment research fundamentals risk`,
+          { matchThreshold: 0.65, matchCount: 4, intent: 'market_analysis' }
+        )
+        const systemPrompt = buildSystemPrompt(researchContext)
         const messages: Anthropic.MessageParam[] = [
           { role: 'user', content: userPrompt },
         ]
 
-        send({ type: 'progress', step: 'Starting AI research agent…', iteration: 0 })
+        send({ type: 'progress', step: 'Starting AI research agent…', iteration: 0, fallback: true })
 
         let response = await anthropic.messages.create({
           model: 'claude-sonnet-4-6',
@@ -668,7 +1030,6 @@ Use your research tools to gather real data, then return a JSON object with this
         const MAX_ITERATIONS = 6
         let dataFetchedAt: string | undefined
 
-        // ── Agentic research loop ──────────────────────────
         while (response.stop_reason === 'tool_use' && iterations < MAX_ITERATIONS) {
           iterations++
 
@@ -676,17 +1037,16 @@ Use your research tools to gather real data, then return a JSON object with this
             (c): c is Anthropic.ToolUseBlock => c.type === 'tool_use'
           )
 
-          // Send a progress event for each tool being called
           for (const toolUse of toolUseBlocks) {
             send({
               type: 'progress',
               step: TOOL_LABELS[toolUse.name] ?? `Running ${toolUse.name}…`,
               iteration: iterations,
               tool: toolUse.name,
+              fallback: true,
             })
           }
 
-          // Execute all tool calls in parallel
           const toolResults: Anthropic.ToolResultBlockParam[] = await Promise.all(
             toolUseBlocks.map(async (toolUse) => {
               const result = await executeTool(
@@ -703,7 +1063,6 @@ Use your research tools to gather real data, then return a JSON object with this
 
           dataFetchedAt = new Date().toISOString()
 
-          // Confirm tools completed
           for (const toolUse of toolUseBlocks) {
             send({
               type: 'progress',
@@ -711,6 +1070,7 @@ Use your research tools to gather real data, then return a JSON object with this
               iteration: iterations,
               tool: toolUse.name,
               done: true,
+              fallback: true,
             })
           }
 
@@ -726,11 +1086,13 @@ Use your research tools to gather real data, then return a JSON object with this
           })
         }
 
-        send({ type: 'progress', step: 'Synthesizing research summary…', iteration: iterations + 1 })
+        send({
+          type: 'progress',
+          step: 'Synthesizing research summary…',
+          iteration: iterations + 1,
+          fallback: true,
+        })
 
-        // ── Force synthesis if loop exited while Claude still wanted tools ──
-        // This happens when MAX_ITERATIONS is hit but Claude hasn't written text yet.
-        // Re-call without the tools array so Claude can only respond with text.
         if (response.stop_reason === 'tool_use') {
           messages.push({ role: 'assistant', content: response.content })
           messages.push({
@@ -743,14 +1105,10 @@ Use your research tools to gather real data, then return a JSON object with this
             model: 'claude-sonnet-4-6',
             max_tokens: 8000,
             system: systemPrompt,
-            // Omit tools — forces a text-only response
             messages,
           })
         }
 
-        const fetchedAt = new Date().toISOString()
-
-        // ── Extract and parse final JSON ───────────────────
         const textBlock = response.content.find(
           (c): c is Anthropic.TextBlock => c.type === 'text'
         )
@@ -761,26 +1119,9 @@ Use your research tools to gather real data, then return a JSON object with this
           return
         }
 
-        const raw = textBlock.text.trim()
-        const stripped = raw
-          .replace(/^```json\s*/i, '')
-          .replace(/^```\s*/i, '')
-          .replace(/\s*```$/i, '')
-          .trim()
+        const analysis = parseJsonObject<Record<string, unknown>>(textBlock.text.trim())
+        const fetchedAt = new Date().toISOString()
 
-        const jsonStart = stripped.indexOf('{')
-        const jsonEnd = stripped.lastIndexOf('}')
-
-        if (jsonStart === -1 || jsonEnd === -1 || jsonEnd <= jsonStart) {
-          console.error('[/api/analysis] No JSON object in response:', stripped.slice(0, 200))
-          send({ type: 'error', error: 'Claude did not return a JSON object. Please try again.' })
-          controller.close()
-          return
-        }
-
-        const analysis = JSON.parse(stripped.slice(jsonStart, jsonEnd + 1))
-
-        // ── Send the complete payload ──────────────────────
         send({
           type: 'complete',
           analysis,
@@ -796,8 +1137,8 @@ Use your research tools to gather real data, then return a JSON object with this
           err instanceof SyntaxError
             ? 'Claude returned malformed JSON — try again'
             : String(err)
-        controller.enqueue(sseEvent({ type: 'error', error: message }))
-        controller.close()
+        send({ type: 'error', error: message })
+        try { controller.close() } catch { /* already closed */ }
       }
     },
   })
@@ -807,6 +1148,7 @@ Use your research tools to gather real data, then return a JSON object with this
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
+      'X-Agent-Mode': 'parallel',
     },
   })
 }

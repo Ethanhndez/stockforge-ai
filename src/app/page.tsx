@@ -1,65 +1,172 @@
-import Image from "next/image";
+// ============================================================
+// src/app/page.tsx
+// Home page — hero, search bar, quick picks, sector explorer
+// ============================================================
 
-export default function Home() {
+'use client'
+
+import { useRouter } from 'next/navigation'
+import Navbar from '@/components/Navbar'
+import SearchBar from '@/components/SearchBar'
+import SectorExplorer from '@/components/SectorExplorer'
+
+const QUICK_PICKS = [
+  { ticker: 'AAPL', label: 'AAPL' },
+  { ticker: 'NVDA', label: 'NVDA' },
+  { ticker: 'TSLA', label: 'TSLA' },
+  { ticker: 'MSFT', label: 'MSFT' },
+  { ticker: 'AMZN', label: 'AMZN' },
+]
+
+export default function HomePage() {
+  const router = useRouter()
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <>
+      <Navbar />
+
+      <main>
+        {/* ── Hero Section ────────────────────────────────── */}
+        <section
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            padding: '72px 24px 48px',
+            textAlign: 'center',
+          }}
+        >
+          {/* Badge */}
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              background: 'rgba(245,196,0,0.08)',
+              border: '1px solid rgba(245,196,0,0.2)',
+              borderRadius: 99,
+              padding: '5px 14px',
+              fontSize: 12,
+              fontWeight: 600,
+              color: 'var(--accent)',
+              letterSpacing: '0.06em',
+              marginBottom: 28,
+            }}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: 'var(--accent)',
+                display: 'inline-block',
+                animation: 'pulse 2s infinite',
+              }}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+            PhD-LEVEL AI RESEARCH · LIVE DATA
+          </div>
+
+          {/* Headline */}
+          <h1
+            style={{
+              fontSize: 'clamp(32px, 5vw, 52px)',
+              fontWeight: 700,
+              letterSpacing: '-0.03em',
+              lineHeight: 1.1,
+              color: 'var(--text)',
+              maxWidth: 640,
+              marginBottom: 16,
+            }}
           >
-            Documentation
-          </a>
+            Wall Street research,{' '}
+            <span style={{ color: 'var(--accent)' }}>explained simply</span>
+          </h1>
+
+          {/* Subheadline */}
+          <p
+            style={{
+              fontSize: 16,
+              color: 'var(--text-muted)',
+              maxWidth: 480,
+              lineHeight: 1.6,
+              marginBottom: 36,
+            }}
+          >
+            AI reads SEC filings, tracks earnings calls, and tests bull &amp; bear cases — then explains it like a friend who works at Goldman.
+          </p>
+
+          {/* Search bar */}
+          <div style={{ width: '100%', maxWidth: 560, marginBottom: 20 }}>
+            <SearchBar />
+          </div>
+
+          {/* Quick picks */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              flexWrap: 'wrap',
+              justifyContent: 'center',
+            }}
+          >
+            <span
+              style={{
+                fontSize: 12,
+                color: 'var(--text-dim)',
+                marginRight: 4,
+              }}
+            >
+              Quick picks:
+            </span>
+            {QUICK_PICKS.map((p) => (
+              <button
+                key={p.ticker}
+                onClick={() => router.push(`/stock/${p.ticker}`)}
+                style={{
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  padding: '4px 12px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  fontFamily: 'var(--font-dm-mono, monospace)',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  letterSpacing: '0.04em',
+                  transition: 'border-color 0.15s, color 0.15s',
+                }}
+                onMouseEnter={(e) => {
+                  const el = e.currentTarget
+                  el.style.borderColor = 'var(--accent)'
+                  el.style.color = 'var(--accent)'
+                }}
+                onMouseLeave={(e) => {
+                  const el = e.currentTarget
+                  el.style.borderColor = 'var(--border)'
+                  el.style.color = 'var(--text-muted)'
+                }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* ── Divider ─────────────────────────────────────── */}
+        <div
+          style={{
+            height: 1,
+            background: 'var(--border)',
+            margin: '0 24px 48px',
+          }}
+        />
+
+        {/* ── Sector Explorer ─────────────────────────────── */}
+        <div style={{ padding: '0 24px' }}>
+          <SectorExplorer />
         </div>
       </main>
-    </div>
-  );
+    </>
+  )
 }
