@@ -1,26 +1,148 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    color-scheme: light dark;
+    --bg: #f4f3ef;
+    --bg-card: rgba(255, 255, 255, 0.84);
+    --bg-elevated: #ffffff;
+    --bg-panel: rgba(245, 244, 240, 0.78);
+    --border: rgba(40, 34, 54, 0.14);
+    --text: #121212;
+    --text-muted: #5d5768;
+    --text-dim: #878093;
+    --accent: #f3c623;
+    --yellow: #f3c623;
+    --yellow-bg: rgba(243, 198, 35, 0.16);
+    --purple: #6f3df4;
+    --purple-soft: rgba(111, 61, 244, 0.12);
+    --purple-strong: #4e22c8;
+    --green: #12a56b;
+    --green-bg: rgba(18, 165, 107, 0.14);
+    --red: #cf445c;
+    --red-bg: rgba(207, 68, 92, 0.12);
+    --shadow-soft: 0 18px 50px rgba(35, 21, 74, 0.08);
+    --shadow-strong: 0 26px 80px rgba(35, 21, 74, 0.16);
+    --font-dm-mono: var(--font-geist-mono);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #090909;
+      --bg-card: rgba(19, 19, 21, 0.82);
+      --bg-elevated: #131316;
+      --bg-panel: rgba(26, 26, 30, 0.92);
+      --border: rgba(255, 255, 255, 0.1);
+      --text: #f4f1ea;
+      --text-muted: #b1a8be;
+      --text-dim: #776f87;
+      --accent: #f3c623;
+      --yellow: #f3c623;
+      --yellow-bg: rgba(243, 198, 35, 0.14);
+      --purple: #8f68ff;
+      --purple-soft: rgba(143, 104, 255, 0.16);
+      --purple-strong: #b18fff;
+      --green: #38d996;
+      --green-bg: rgba(56, 217, 150, 0.16);
+      --red: #ff6c87;
+      --red-bg: rgba(255, 108, 135, 0.14);
+      --shadow-soft: 0 20px 60px rgba(0, 0, 0, 0.28);
+      --shadow-strong: 0 30px 100px rgba(0, 0, 0, 0.42);
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    background:
+      radial-gradient(circle at top left, rgba(111, 61, 244, 0.18), transparent 28%),
+      radial-gradient(circle at top right, rgba(243, 198, 35, 0.14), transparent 24%),
+      var(--bg);
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 15% 20%, rgba(111, 61, 244, 0.18), transparent 0 28%),
+      radial-gradient(circle at 85% 0%, rgba(243, 198, 35, 0.16), transparent 0 22%),
+      linear-gradient(180deg, transparent, rgba(111, 61, 244, 0.03)),
+      var(--bg);
+    color: var(--text);
+    font-family: var(--font-geist-sans), system-ui, sans-serif;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: radial-gradient(circle at center, black 48%, transparent 92%);
+    opacity: 0.2;
+  }
+
+  a {
+    color: inherit;
+  }
+
+  button,
+  input {
+    font: inherit;
+  }
+
+  ::selection {
+    background: var(--purple);
+    color: white;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(1.18);
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -10px, 0);
+  }
 }

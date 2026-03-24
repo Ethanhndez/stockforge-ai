@@ -1,105 +1,166 @@
-// ============================================================
-// src/components/ResearchPostureCard.tsx
-// Renders a ResearchPosture object from /api/analysis/stream.
-// Used with useStockAnalysis hook. Lightweight alternative to
-// the full AnalysisSection — shows posture fields only.
-// ============================================================
-
 import type { ResearchPosture } from '@/lib/tools'
 
 export function ResearchPostureCard({ posture }: { posture: ResearchPosture }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Header */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div
         style={{
           display: 'flex',
-          alignItems: 'center',
+          alignItems: 'flex-start',
           justifyContent: 'space-between',
-          borderBottom: '1px solid var(--border)',
-          paddingBottom: 16,
+          gap: 12,
+          padding: '22px 24px',
+          borderRadius: 26,
+          border: '1px solid var(--border)',
+          background:
+            'linear-gradient(145deg, rgba(111, 61, 244, 0.94), rgba(24, 18, 38, 0.98))',
+          boxShadow: 'var(--shadow-strong)',
+          color: 'white',
         }}
       >
-        <h2
+        <div>
+          <div
+            style={{
+              fontSize: 11,
+              letterSpacing: '0.16em',
+              textTransform: 'uppercase',
+              color: 'rgba(255,255,255,0.62)',
+            }}
+          >
+            Research Briefing
+          </div>
+          <h2
+            style={{
+              margin: '8px 0 0',
+              fontSize: 28,
+              fontWeight: 700,
+              letterSpacing: '-0.05em',
+              color: 'white',
+            }}
+          >
+            {posture.ticker}
+          </h2>
+        </div>
+        <span
           style={{
-            fontSize: 20,
-            fontWeight: 700,
-            color: 'var(--text)',
+            fontSize: 11,
+            color: 'rgba(255,255,255,0.68)',
             fontFamily: 'var(--font-dm-mono, monospace)',
+            textAlign: 'right',
           }}
         >
-          {posture.ticker} Research Briefing
-        </h2>
-        <span style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-dm-mono, monospace)' }}>
           {new Date(posture.fetchedAt).toLocaleString()}
         </span>
       </div>
 
-      {/* Bull Case */}
-      <CaseSection
-        label="Bull Case"
-        content={posture.bull_case}
-        color="green"
-        icon="▲"
-      />
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+          gap: 16,
+        }}
+      >
+        <CaseSection label="Bull Case" content={posture.bull_case} color="green" icon="▲" />
+        <CaseSection label="Bear Case" content={posture.bear_case} color="red" icon="▼" />
+      </div>
 
-      {/* Bear Case */}
-      <CaseSection
-        label="Bear Case"
-        content={posture.bear_case}
-        color="red"
-        icon="▼"
-      />
-
-      {/* Key Risks */}
       {posture.key_risks.length > 0 && (
         <div
           style={{
-            background: 'var(--yellow-bg, #fefce8)',
-            border: '1px solid var(--yellow-border, #fde68a)',
-            borderRadius: 10,
-            padding: 16,
+            background:
+              'linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 94%, transparent), color-mix(in srgb, var(--yellow-bg) 50%, transparent))',
+            border: '1px solid var(--border)',
+            borderRadius: 24,
+            padding: 20,
+            boxShadow: 'var(--shadow-soft)',
           }}
         >
-          <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--yellow-text, #92400e)', marginBottom: 10 }}>
-            ⚠ Key Risks
+          <h3
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: '0.16em',
+              color: 'var(--accent)',
+              textTransform: 'uppercase',
+              margin: '0 0 14px',
+            }}
+          >
+            Key Risks
           </h3>
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <ul
+            style={{
+              listStyle: 'none',
+              padding: 0,
+              margin: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+            }}
+          >
             {posture.key_risks.map((risk, i) => (
-              <li key={i} style={{ fontSize: 13, color: 'var(--yellow-text, #92400e)' }}>
-                • {risk}
+              <li
+                key={i}
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 10,
+                  color: 'var(--text-muted)',
+                  lineHeight: 1.7,
+                  fontSize: 14,
+                }}
+              >
+                <span style={{ color: 'var(--accent)', flexShrink: 0 }}>{String(i + 1).padStart(2, '0')}</span>
+                <span>{risk}</span>
               </li>
             ))}
           </ul>
         </div>
       )}
 
-      {/* Data Gaps */}
       {posture.data_gaps.length > 0 && (
         <div
           style={{
-            background: 'var(--bg-elevated)',
+            background:
+              'linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 94%, transparent), color-mix(in srgb, var(--bg-panel) 94%, transparent))',
             border: '1px solid var(--border)',
-            borderRadius: 10,
-            padding: 16,
+            borderRadius: 24,
+            padding: 20,
+            boxShadow: 'var(--shadow-soft)',
           }}
         >
-          <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 10 }}>
-            ◌ Data Gaps
+          <h3
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: '0.16em',
+              color: 'var(--text-dim)',
+              textTransform: 'uppercase',
+              margin: '0 0 14px',
+            }}
+          >
+            Data Gaps
           </h3>
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <ul
+            style={{
+              listStyle: 'none',
+              padding: 0,
+              margin: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+            }}
+          >
             {posture.data_gaps.map((gap, i) => (
-              <li key={i} style={{ fontSize: 13, color: 'var(--text-dim)' }}>
-                ○ {gap}
+              <li key={i} style={{ fontSize: 14, color: 'var(--text-muted)', lineHeight: 1.7 }}>
+                ◌ {gap}
               </li>
             ))}
           </ul>
         </div>
       )}
 
-      {/* RAG sources */}
       {posture.rag_sources && posture.rag_sources.length > 0 && (
-        <p style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+        <p style={{ fontSize: 11, color: 'var(--text-dim)', margin: 0 }}>
           Research basis: {posture.rag_sources.join(', ')}
         </p>
       )}
@@ -122,27 +183,33 @@ function CaseSection({
   return (
     <div
       style={{
-        background: isGreen ? 'var(--green-bg)' : 'var(--red-bg)',
+        background:
+          'linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 94%, transparent), color-mix(in srgb, var(--bg-panel) 94%, transparent))',
         border: `1px solid ${isGreen ? 'var(--green)' : 'var(--red)'}`,
-        borderRadius: 10,
-        padding: 16,
+        borderRadius: 24,
+        padding: 20,
+        boxShadow: 'var(--shadow-soft)',
       }}
     >
       <h3
         style={{
-          fontSize: 13,
-          fontWeight: 600,
+          display: 'inline-block',
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: '0.16em',
           color: isGreen ? 'var(--green)' : 'var(--red)',
-          marginBottom: 8,
+          margin: 0,
+          textTransform: 'uppercase',
         }}
       >
         {icon} {label}
       </h3>
       <p
         style={{
-          fontSize: 13,
-          lineHeight: 1.7,
-          color: isGreen ? 'var(--green-text, #14532d)' : 'var(--red-text, #7f1d1d)',
+          margin: '14px 0 0',
+          fontSize: 14,
+          lineHeight: 1.8,
+          color: 'var(--text-muted)',
         }}
       >
         {content}

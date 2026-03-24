@@ -12,9 +12,14 @@ const SEC_HEADERS = {
   'Accept': 'application/json',
 }
 
+interface EdgarIndexItem {
+  name?: string
+  type?: string
+}
+
 // ── Individual tool implementations ─────────────────────────
 
-async function getCompanyProfile(ticker: string) {
+export async function getCompanyProfile(ticker: string) {
   try {
     const res = await fetch(
       `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${ticker}&type=10-K&dateb=&owner=include&count=1&output=atom`,
@@ -43,7 +48,7 @@ async function getCompanyProfile(ticker: string) {
   }
 }
 
-async function getFundamentals(ticker: string) {
+export async function getFundamentals(ticker: string) {
   try {
     const res = await fetch(
       `https://api.polygon.io/v3/reference/tickers/${encodeURIComponent(ticker)}?apiKey=${POLYGON_API_KEY}`
@@ -67,7 +72,7 @@ async function getFundamentals(ticker: string) {
   }
 }
 
-async function getFinancials(ticker: string) {
+export async function getFinancials(ticker: string) {
   try {
     const res = await fetch(
       `https://api.polygon.io/vX/reference/financials?ticker=${encodeURIComponent(ticker)}&timeframe=annual&limit=1&apiKey=${POLYGON_API_KEY}`
@@ -93,11 +98,13 @@ async function getFinancials(ticker: string) {
     const cash = val(
       (balance.cash_and_cash_equivalents_and_short_term_investments ??
        balance.cash_and_cash_equivalents_including_short_term_investments ??
-       balance.cash_and_cash_equivalents ??
-       balance.current_assets) as Record<string, unknown>
+       balance.cash_and_cash_equivalents) as Record<string, unknown>
     ) ?? null
     const operatingCashFlow = val(cf.net_cash_flow_from_operating_activities as Record<string, unknown>)
-    const operatingMargin = revenue && opIncome ? ((opIncome / revenue) * 100).toFixed(1) + '%' : null
+    const operatingMargin =
+      revenue !== null && revenue !== 0 && opIncome !== null
+        ? ((opIncome / revenue) * 100).toFixed(1) + '%'
+        : null
 
     const fmt = (n: number | null): string | null => {
       if (n === null) return null
@@ -122,6 +129,13 @@ async function getFinancials(ticker: string) {
       operatingCashFlow: fmt(operatingCashFlow),
       dilutedEPS:        dilutedEPS !== null ? `$${dilutedEPS.toFixed(2)}` : null,
       dilutedEPSRaw:     dilutedEPS,
+      revenueRaw:        revenue,
+      netIncomeRaw:      netIncome,
+      operatingIncomeRaw: opIncome,
+      totalAssetsRaw:    totalAssets,
+      longTermDebtRaw:   longTermDebt,
+      cashRaw:           cash,
+      operatingCashFlowRaw: operatingCashFlow,
       fetchedAt: new Date().toISOString(),
     }
   } catch (e) {
@@ -129,7 +143,7 @@ async function getFinancials(ticker: string) {
   }
 }
 
-async function getRecentFilings(cik: string) {
+export async function getRecentFilings(cik: string) {
   try {
     const res = await fetch(`https://data.sec.gov/submissions/CIK${cik}.json`, { headers: SEC_HEADERS })
     if (!res.ok) return { error: `SEC returned HTTP ${res.status}` }
@@ -166,7 +180,7 @@ async function getRecentFilings(cik: string) {
   }
 }
 
-async function getNews(ticker: string, limit: number) {
+export async function getNews(ticker: string, limit: number) {
   const clampedLimit = Math.min(Math.max(limit, 1), 10)
   try {
     const res = await fetch(
@@ -194,7 +208,7 @@ async function getNews(ticker: string, limit: number) {
   }
 }
 
-async function getQuote(ticker: string) {
+export async function getQuote(ticker: string) {
   try {
     const res = await fetch(
       `https://api.polygon.io/v2/aggs/ticker/${ticker}/prev?adjusted=true&apiKey=${POLYGON_API_KEY}`
@@ -224,7 +238,7 @@ async function getQuote(ticker: string) {
   }
 }
 
-async function compareStocks(tickerA: string, tickerB: string) {
+export async function compareStocks(tickerA: string, tickerB: string) {
   const [[quoteA, profileA], [quoteB, profileB]] = await Promise.all([
     Promise.all([getQuote(tickerA), getCompanyProfile(tickerA)]),
     Promise.all([getQuote(tickerB), getCompanyProfile(tickerB)]),
@@ -233,6 +247,76 @@ async function compareStocks(tickerA: string, tickerB: string) {
     tickerA: { quote: quoteA, profile: profileA },
     tickerB: { quote: quoteB, profile: profileB },
     fetchedAt: new Date().toISOString(),
+  }
+}
+
+export async function getFilingContent(cik: string, accessionNumber: string) {
+  const accessionClean = accessionNumber.replace(/-/g, '')
+  const baseUrl = `https://data.sec.gov/Archives/edgar/data/${parseInt(cik, 10)}/${accessionClean}`
+  const indexUrl = `${baseUrl}/${accessionClean}-index.json`
+
+  try {
+    const indexRes = await fetch(indexUrl, { headers: SEC_HEADERS })
+    if (!indexRes.ok) {
+      return { content: '', source: indexUrl, error: `Index fetch failed: ${indexRes.status}` }
+    }
+
+    const index = await indexRes.json() as {
+      directory?: { item?: EdgarIndexItem[] }
+      documents?: Array<{ document?: string; type?: string }>
+    }
+
+    const directoryItems = index.directory?.item ?? []
+    const documentEntries = index.documents ?? []
+
+    const primaryDocFromDocuments =
+      documentEntries.find(
+        (doc) => doc.type && ['10-K', '10-Q', '8-K'].includes(doc.type)
+      )?.document ?? documentEntries[0]?.document
+
+    const primaryDocFromDirectory =
+      directoryItems.find((item) => {
+        const name = item.name?.toLowerCase() ?? ''
+        return (
+          !name.endsWith('-index.html') &&
+          !name.endsWith('-index.htm') &&
+          (name.endsWith('.htm') || name.endsWith('.html') || name.endsWith('.txt'))
+        )
+      })?.name
+
+    const primaryDocument = primaryDocFromDocuments ?? primaryDocFromDirectory
+
+    if (!primaryDocument) {
+      return { content: '', source: indexUrl, error: 'No primary document found in filing index' }
+    }
+
+    const docUrl = `${baseUrl}/${primaryDocument}`
+    const docRes = await fetch(docUrl, { headers: SEC_HEADERS })
+    if (!docRes.ok) {
+      return { content: '', source: docUrl, error: `Document fetch failed: ${docRes.status}` }
+    }
+
+    const rawHtml = await docRes.text()
+    const stripped = rawHtml
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+
+    return {
+      content:
+        stripped.length > 8000
+          ? stripped.slice(0, 8000) + '\n\n[Content truncated at 8,000 characters]'
+          : stripped,
+      source: docUrl,
+    }
+  } catch (e) {
+    return { content: '', source: indexUrl, error: `getFilingContent failed: ${String(e)}` }
   }
 }
 
@@ -259,6 +343,8 @@ export async function executeTool(
       return getQuote(toolInput.ticker as string)
     case 'compareStocks':
       return compareStocks(toolInput.tickerA as string, toolInput.tickerB as string)
+    case 'getFilingContent':
+      return getFilingContent(toolInput.cik as string, toolInput.accessionNumber as string)
     default:
       return { error: `Unknown tool: ${toolName}` }
   }

@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import fs from 'fs'
+import path from 'path'
 
 // This TypeScript interface defines the exact shape of data we'll return.
 // Think of it as a contract — if our code doesn't match this shape,
@@ -8,7 +10,16 @@ interface QuoteResponse {
   price: number
   change: number
   changePercent: number
-  timestamp: string
+  barTimestamp: string  // when the trading bar occurred (from Polygon bar data)
+  fetchedAt: string     // when our server received the Polygon response
+}
+
+const FIXTURE_QUOTES: Record<string, { price: number; change: number; changePercent: number }> = {
+  AAPL: { price: 227.48, change: 2.13, changePercent: 0.9449 },
+  NVDA: { price: 912.35, change: 14.28, changePercent: 1.589 },
+  TSLA: { price: 176.82, change: -2.41, changePercent: -1.344 },
+  MSFT: { price: 438.62, change: 3.74, changePercent: 0.861 },
+  AMZN: { price: 182.14, change: 1.92, changePercent: 1.066 },
 }
 
 // We export a named function called GET — Next.js sees this and automatically
@@ -29,6 +40,37 @@ export async function GET(request: NextRequest) {
     )
   }
 
+  // ── Fixture mode — no external API calls ──────────────────
+  if (process.env.NEXT_PUBLIC_USE_FIXTURES === 'true') {
+    await new Promise((r) => setTimeout(r, 150))
+    const fixture = JSON.parse(
+      fs.readFileSync(
+        path.join(process.cwd(), 'src/lib/fixtures/aapl-quote.json'),
+        'utf-8'
+      )
+    ) as QuoteResponse
+
+    const seeded = FIXTURE_QUOTES[ticker]
+    if (!seeded) {
+      return NextResponse.json(
+        { error: `Ticker '${ticker}' not found. Check the symbol and try again.` },
+        { status: 404 }
+      )
+    }
+
+    return NextResponse.json(
+      {
+        ...fixture,
+        ticker,
+        price: seeded.price,
+        change: seeded.change,
+        changePercent: seeded.changePercent,
+        fetchedAt: new Date().toISOString(),
+      } satisfies QuoteResponse,
+      { status: 200 }
+    )
+  }
+
   // process.env.POLYGON_API_KEY reads from .env.local
   // This only works server-side — it would be undefined in a client component
   const apiKey = process.env.POLYGON_API_KEY
@@ -46,6 +88,7 @@ export async function GET(request: NextRequest) {
       `https://api.polygon.io/v2/aggs/ticker/${ticker}/prev?adjusted=true&apiKey=${apiKey}`,
       { next: { revalidate: 3600 } } // Cache for 1 hour since it's previous day data
     )
+    const fetchedAt = new Date().toISOString()
 
     if (!response.ok) {
       return NextResponse.json(
@@ -70,7 +113,8 @@ export async function GET(request: NextRequest) {
       price: day.c,                                    // closing price
       change: day.c - day.o,                           // close minus open
       changePercent: ((day.c - day.o) / day.o) * 100, // percent change
-      timestamp: new Date(day.t).toISOString(),        // bar timestamp
+      barTimestamp: new Date(day.t).toISOString(),     // when the trading bar occurred
+      fetchedAt,                                       // when our server received this data
     }
 
     return NextResponse.json(result, { status: 200 })

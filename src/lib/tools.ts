@@ -52,6 +52,7 @@ export interface QuoteResult {
   tradingDate: string
   fetchedAt?: string
   source?: 'polygon.io'
+  error?: string
 }
 
 export interface NewsItem {
@@ -69,6 +70,7 @@ export interface NewsResult {
   articles: NewsItem[]
   fetchedAt?: string
   source?: 'polygon.io'
+  error?: string
 }
 
 export interface FundamentalsResult {
@@ -99,6 +101,13 @@ export interface FinancialsResult {
   operatingCashFlow?: string | null
   dilutedEPS?: string | null
   dilutedEPSRaw?: number | null
+  revenueRaw?: number | null
+  netIncomeRaw?: number | null
+  operatingIncomeRaw?: number | null
+  totalAssetsRaw?: number | null
+  longTermDebtRaw?: number | null
+  cashRaw?: number | null
+  operatingCashFlowRaw?: number | null
   fetchedAt?: string
   error?: string
 }

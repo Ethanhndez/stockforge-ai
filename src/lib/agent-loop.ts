@@ -20,7 +20,7 @@ export async function runStockAnalysisAgent(
 ): Promise<{ text: string; posture: ResearchPosture | null }> {
   const ragContext = await getResearchContext(
     `stock analysis ${ticker} investment research fundamentals risk`,
-    { matchThreshold: 0.65, matchCount: 4 }
+    { matchThreshold: 0.65, matchCount: 4, intent: 'market_analysis' }
   )
 
   const systemPrompt = buildAgentSystemPrompt(ragContext)

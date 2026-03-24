@@ -109,4 +109,24 @@ export const STOCK_TOOLS: Anthropic.Tool[] = [
       required: ['tickerA', 'tickerB'],
     },
   },
+  {
+    name: 'getFilingContent',
+    description:
+      'Fetch the text content of a recent SEC EDGAR filing using CIK and accession number. ' +
+      'Use after get_recent_filings when you need the actual filing body.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        cik: {
+          type: 'string',
+          description: '10-digit zero-padded CIK from getCompanyProfile',
+        },
+        accessionNumber: {
+          type: 'string',
+          description: 'Accession number from get_recent_filings, including dashes',
+        },
+      },
+      required: ['cik', 'accessionNumber'],
+    },
+  },
 ]

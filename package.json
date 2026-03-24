@@ -6,21 +6,36 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "security-scan": "npx ecc-agentshield scan",
+    "prepare": "husky",
+    "ruflo:start": "npx ruflo@latest mcp start --config .ruflo/config.json",
+    "test:fixtures": "NEXT_PUBLIC_USE_FIXTURES=true next dev",
+    "test:types": "tsc --noEmit",
+    "test:lint": "eslint src/",
+    "test:smoke": "node scripts/smokeTest.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.79.0",
+    "@supabase/ssr": "^0.9.0",
+    "@supabase/supabase-js": "^2.99.2",
+    "clsx": "^2.1.1",
+    "dotenv": "^17.3.1",
     "next": "16.1.7",
+    "openai": "^6.32.0",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
+    "@tailwindcss/postcss": "^4.2.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.7",
+    "husky": "^9.1.7",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
