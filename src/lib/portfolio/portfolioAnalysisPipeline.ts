@@ -1,12 +1,14 @@
 import { buildStockContext } from '@/lib/ai/contextBuilder'
-import { analyzePortfolio } from '@/lib/ai/agentOrchestrator'
+import { analyzePortfolioWithTelemetry } from '@/lib/ai/agentOrchestrator'
 import type {
+  PipelineStageDurations,
   PolicyAssessment,
   PortfolioRiskReport,
   RebalanceProposal,
   ResearchSummary,
 } from '@/lib/portfolio/agentTypes'
-import { createClient } from '@/lib/supabase/server'
+import { optimizePortfolio } from '@/lib/ai/optimizationClient'
+import { createClient, type AppSupabaseClient } from '@/lib/supabase/server'
 import type { HoldingRecord } from '@/lib/portfolio/types'
 
 interface AllocationTargetRow {
@@ -49,6 +51,16 @@ interface AgentDecisionRow {
   run_at: string
 }
 
+interface PipelineErrorEntry {
+  at: string
+  step: string
+  message: string
+}
+
+interface PortfolioOwnershipRow {
+  id: string
+}
+
 interface HoldingSnapshot extends HoldingRecord {
   shares: number
   cost_basis: number | null
@@ -60,6 +72,7 @@ export interface PipelineResult {
   policyAssessment: PolicyAssessment
   riskReport: PortfolioRiskReport
   researchSummaries: ResearchSummary[]
+  stageDurations: PipelineStageDurations
   ranAt: string
 }
 
@@ -82,12 +95,74 @@ function nowIso(): string {
   return new Date().toISOString()
 }
 
+function elapsedMs(startedAt: number): number {
+  return Date.now() - startedAt
+}
+
+function normalizeKey(value: string): string {
+  return value.trim().toUpperCase()
+}
+
+interface PositionValue {
+  ticker: string
+  sector: string
+  shares: number
+  quote: number | null
+  value: number | null
+}
+
+function createEmptyStageDurations(): PipelineStageDurations {
+  return {
+    totalMs: 0,
+    decisionWriteMs: 0,
+    cashBalanceMs: 0,
+    researchMs: 0,
+    policyAssessmentMs: 0,
+    riskReportMs: 0,
+    proposalBuildMs: 0,
+    proposalWriteMs: 0,
+    perTicker: {},
+  }
+}
+
+function finalizeStageDurations(
+  stageDurations: PipelineStageDurations,
+  pipelineStartedAt: number
+): PipelineStageDurations {
+  return {
+    ...stageDurations,
+    totalMs: elapsedMs(pipelineStartedAt),
+  }
+}
+
 function normalizeHoldings(holdings: HoldingRecord[]): HoldingSnapshot[] {
   return holdings.map((holding) => ({
     ...holding,
     shares: parseNumber(holding.shares),
     cost_basis: parseNullableNumber(holding.cost_basis),
   }))
+}
+
+function buildPositionValues(
+  holdings: HoldingSnapshot[],
+  researchSummaries: ResearchSummary[]
+): PositionValue[] {
+  return holdings.map((holding) => {
+    const summary = researchSummaries.find((item) => item.ticker === holding.ticker)
+    const quote = summary?.quote?.price ?? null
+
+    return {
+      ticker: holding.ticker,
+      sector: summary?.fundamentals?.sector ?? 'Unclassified',
+      shares: holding.shares,
+      quote,
+      value: quote !== null ? quote * holding.shares : null,
+    }
+  })
+}
+
+function sumKnownPositionValues(positionValues: PositionValue[]): number {
+  return positionValues.reduce((sum, position) => sum + (position.value ?? 0), 0)
 }
 
 function selectActivePolicy(policies: PortfolioPolicyRow[]): PortfolioPolicyRow | null {
@@ -107,38 +182,40 @@ function buildPolicyAssessment(args: {
   targets: AllocationTargetRow[]
   policies: PortfolioPolicyRow[]
   researchSummaries: ResearchSummary[]
+  cashBalance: number
 }): PolicyAssessment {
   const assessedAt = nowIso()
   const activePolicy = selectActivePolicy(args.policies)
-  const totalValue = args.researchSummaries.reduce((sum, summary) => {
-    const quote = summary.quote?.price ?? 0
-    const shares = args.holdings.find((holding) => holding.ticker === summary.ticker)?.shares ?? 0
-    return sum + quote * shares
-  }, 0)
+  const positionValues = buildPositionValues(args.holdings, args.researchSummaries)
+  const knownHoldingsValue = sumKnownPositionValues(positionValues)
+  const totalValue = knownHoldingsValue + args.cashBalance
 
   const tickerTargets = args.targets.filter((target) => target.target_type === 'ticker')
   const allocationDrift = tickerTargets
     .map((target) => {
-      const holding = args.holdings.find((item) => item.ticker === target.target_key)
-      const quote = args.researchSummaries.find((item) => item.ticker === target.target_key)?.quote?.price ?? 0
-      const currentWeight =
-        totalValue > 0 && holding ? (holding.shares * quote) / totalValue : 0
+      const position = positionValues.find((item) => item.ticker === normalizeKey(target.target_key))
+      if (!position || position.value === null) {
+        return null
+      }
+
+      const currentWeight = totalValue > 0 ? position.value / totalValue : 0
       const targetWeight = parseNumber(target.target_pct)
 
       return {
-        ticker: target.target_key,
+        ticker: normalizeKey(target.target_key),
         currentWeight: Number(currentWeight.toFixed(4)),
         targetWeight: Number(targetWeight.toFixed(4)),
         driftAmount: Number((currentWeight - targetWeight).toFixed(4)),
       }
     })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
     .filter((item) => Math.abs(item.driftAmount) >= 0.02)
 
   const policyViolations = []
 
   if (activePolicy?.prohibited_tickers?.length) {
     for (const ticker of activePolicy.prohibited_tickers) {
-      if (args.holdings.some((holding) => holding.ticker === ticker)) {
+      if (args.holdings.some((holding) => holding.ticker === normalizeKey(ticker))) {
         policyViolations.push({
           rule: 'prohibited_ticker',
           description: `${ticker} is currently held despite being listed as prohibited.`,
@@ -150,7 +227,7 @@ function buildPolicyAssessment(args: {
 
   if (activePolicy?.required_tickers?.length) {
     for (const ticker of activePolicy.required_tickers) {
-      if (!args.holdings.some((holding) => holding.ticker === ticker)) {
+      if (!args.holdings.some((holding) => holding.ticker === normalizeKey(ticker))) {
         policyViolations.push({
           rule: 'required_ticker_missing',
           description: `${ticker} is marked as required but is not present in the portfolio.`,
@@ -160,18 +237,118 @@ function buildPolicyAssessment(args: {
     }
   }
 
-  const qualityFlags = args.researchSummaries.flatMap((summary) =>
-    summary.dataGaps.slice(0, 2).map((gap) => ({
-      ticker: summary.ticker,
-      flag: gap,
-      source: 'dataGaps',
-    }))
-  )
+  const maxPositionPct = parseNullableNumber(activePolicy?.max_position_pct)
+  if (maxPositionPct !== null && totalValue > 0) {
+    for (const position of positionValues) {
+      if (position.value === null) continue
+      const weight = position.value / totalValue
+      if (weight > maxPositionPct) {
+        policyViolations.push({
+          rule: 'max_position_pct',
+          description: `${position.ticker} exceeds the max_position_pct policy threshold.`,
+          severity: 'hard' as const,
+        })
+      }
+    }
+  }
+
+  const maxSectorPct = parseNullableNumber(activePolicy?.max_sector_pct)
+  if (maxSectorPct !== null && totalValue > 0) {
+    const sectorTotals = new Map<string, number>()
+    for (const position of positionValues) {
+      if (position.value === null) continue
+      sectorTotals.set(position.sector, (sectorTotals.get(position.sector) ?? 0) + position.value)
+    }
+
+    for (const [sector, value] of sectorTotals.entries()) {
+      if (value / totalValue > maxSectorPct) {
+        policyViolations.push({
+          rule: 'max_sector_pct',
+          description: `${sector} exceeds the max_sector_pct policy threshold.`,
+          severity: 'hard' as const,
+        })
+      }
+    }
+  }
+
+  const maxSingleTradeValue = parseNullableNumber(activePolicy?.max_single_trade_value)
+  if (maxSingleTradeValue !== null && totalValue > 0) {
+    for (const drift of allocationDrift) {
+      const currentValue = totalValue * drift.currentWeight
+      const targetValue = totalValue * drift.targetWeight
+      if (Math.abs(targetValue - currentValue) > maxSingleTradeValue) {
+        policyViolations.push({
+          rule: 'max_single_trade_value',
+          description: `${drift.ticker} would require more than the configured max_single_trade_value to rebalance.`,
+          severity: 'soft' as const,
+        })
+      }
+    }
+  }
+
+  const sectorTargets = args.targets.filter((target) => target.target_type === 'sector')
+  if (sectorTargets.length > 0 && totalValue > 0) {
+    const sectorTotals = new Map<string, number>()
+    for (const position of positionValues) {
+      if (position.value === null) continue
+      const key = normalizeKey(position.sector)
+      sectorTotals.set(key, (sectorTotals.get(key) ?? 0) + position.value)
+    }
+
+    for (const target of sectorTargets) {
+      const currentWeight = (sectorTotals.get(normalizeKey(target.target_key)) ?? 0) / totalValue
+      const targetWeight = parseNumber(target.target_pct)
+      if (Math.abs(currentWeight - targetWeight) >= 0.02) {
+        policyViolations.push({
+          rule: 'sector_target_drift',
+          description: `Sector target ${target.target_key} is drifting by ${Number((Math.abs(currentWeight - targetWeight) * 100).toFixed(1))}% from its target.`,
+          severity: 'soft' as const,
+        })
+      }
+    }
+  }
+
+  const assetClassTargets = args.targets.filter((target) => target.target_type === 'asset_class')
+  if (assetClassTargets.length > 0 && totalValue > 0) {
+    const cashWeight = args.cashBalance / totalValue
+    const equityWeight = knownHoldingsValue / totalValue
+
+    for (const target of assetClassTargets) {
+      const key = normalizeKey(target.target_key)
+      const currentWeight = key === 'CASH' ? cashWeight : key === 'EQUITY' ? equityWeight : null
+      if (currentWeight === null) continue
+      const targetWeight = parseNumber(target.target_pct)
+      if (Math.abs(currentWeight - targetWeight) >= 0.02) {
+        policyViolations.push({
+          rule: 'asset_class_target_drift',
+          description: `Asset class target ${target.target_key} is drifting by ${Number((Math.abs(currentWeight - targetWeight) * 100).toFixed(1))}% from its target.`,
+          severity: 'soft' as const,
+        })
+      }
+    }
+  }
+
+  const qualityFlags = [
+    ...args.researchSummaries.flatMap((summary) =>
+      summary.dataGaps.slice(0, 2).map((gap) => ({
+        ticker: summary.ticker,
+        flag: gap,
+        source: 'dataGaps',
+      }))
+    ),
+    ...positionValues
+      .filter((position) => position.quote === null)
+      .map((position) => ({
+        ticker: position.ticker,
+        flag: 'Quote unavailable; drift calculation skipped for this holding.',
+        source: 'quote',
+      })),
+  ]
 
   const overallStatus =
     policyViolations.some((violation) => violation.severity === 'hard')
       ? 'action_required'
-      : allocationDrift.length > 0 || qualityFlags.length > 0
+      : allocationDrift.length > 0 || policyViolations.length > 0 || qualityFlags.length > 0
         ? 'attention_needed'
         : 'healthy'
 
@@ -195,22 +372,14 @@ function buildRiskReport(args: {
   const maxPositionPct = parseNullableNumber(activePolicy?.max_position_pct) ?? 0.12
   const maxSectorPct = parseNullableNumber(activePolicy?.max_sector_pct) ?? 0.3
 
-  const holdingValues = args.holdings.map((holding) => {
-    const price = args.researchSummaries.find((summary) => summary.ticker === holding.ticker)?.quote?.price ?? 0
-    return {
-      ticker: holding.ticker,
-      value: price * holding.shares,
-      sector:
-        args.researchSummaries.find((summary) => summary.ticker === holding.ticker)?.fundamentals?.sector ??
-        'Unclassified',
-    }
-  })
-
-  const totalHoldingsValue = holdingValues.reduce((sum, holding) => sum + holding.value, 0)
+  const positionValues = buildPositionValues(args.holdings, args.researchSummaries)
+  const totalHoldingsValue = sumKnownPositionValues(positionValues)
   const totalValue = totalHoldingsValue + args.cashBalance
+  const missingQuotes = positionValues.filter((position) => position.quote === null)
 
-  const concentrationRisks = holdingValues
+  const concentrationRisks = positionValues
     .map((holding) => {
+      if (holding.value === null) return null
       const weight = totalValue > 0 ? holding.value / totalValue : 0
       return {
         ticker: holding.ticker,
@@ -219,10 +388,12 @@ function buildRiskReport(args: {
         description: `${holding.ticker} is ${Number((weight * 100).toFixed(1))}% of portfolio value versus a ${Number((maxPositionPct * 100).toFixed(1))}% threshold.`,
       }
     })
+    .filter((risk): risk is NonNullable<typeof risk> => Boolean(risk))
     .filter((risk) => risk.weight > risk.threshold)
 
   const sectorTotals = new Map<string, number>()
-  for (const holding of holdingValues) {
+  for (const holding of positionValues) {
+    if (holding.value === null) continue
     sectorTotals.set(holding.sector, (sectorTotals.get(holding.sector) ?? 0) + holding.value)
   }
 
@@ -251,8 +422,16 @@ function buildRiskReport(args: {
     )
   }
 
+  if (missingQuotes.length > 0) {
+    riskNotes.push(
+      `Quote data is unavailable for ${missingQuotes.map((position) => position.ticker).join(', ')}, so concentration checks are incomplete for those holdings.`
+    )
+  }
+
   const overallRiskLevel =
-    concentrationRisks.length > 1 || sectorRisks.length > 1
+    missingQuotes.length > 0
+      ? 'elevated'
+      : concentrationRisks.length > 1 || sectorRisks.length > 1
       ? 'high'
       : concentrationRisks.length === 1 || sectorRisks.length === 1 || cashDriftWarning
         ? 'elevated'
@@ -277,16 +456,27 @@ function buildRebalanceProposal(args: {
   policyAssessment: PolicyAssessment
   riskReport: PortfolioRiskReport
 }): RebalanceProposal {
+  void optimizePortfolio
+
+  // PHASE 2/3 INTEGRATION POINT:
+  // When optimizationClient.optimizePortfolio() is live, replace the qualitative
+  // proposal below with:
+  //   1. Build PortfolioOptimizationInput from researchSummaries + priceHistory
+  //   2. Call optimizePortfolio(input)
+  //   3. Convert optimalWeights -> ProposedTrades via diffing against currentWeights
+  // See: src/lib/ai/optimizationClient.ts
   const proposedAt = nowIso()
-  const totalValue = args.holdings.reduce((sum, holding) => {
-    const quote = args.researchSummaries.find((summary) => summary.ticker === holding.ticker)?.quote?.price ?? 0
-    return sum + quote * holding.shares
-  }, 0)
+  const totalValue = sumKnownPositionValues(
+    buildPositionValues(args.holdings, args.researchSummaries)
+  )
 
   const proposedTrades = args.policyAssessment.allocationDrift
     .filter((item) => Math.abs(item.driftAmount) >= 0.03)
     .map((item) => {
-      const quote = args.researchSummaries.find((summary) => summary.ticker === item.ticker)?.quote?.price ?? 0
+      const quote = args.researchSummaries.find((summary) => summary.ticker === item.ticker)?.quote?.price ?? null
+      if (quote === null) {
+        return null
+      }
       const targetValue = totalValue * item.targetWeight
       const targetShares = quote > 0 ? Math.max(Math.round(targetValue / quote), 0) : 0
       const action = item.driftAmount > 0 ? 'sell' : 'buy'
@@ -300,11 +490,13 @@ function buildRebalanceProposal(args: {
         dataSource: `Polygon.io /v2/aggs/ticker/${item.ticker}/prev`,
       } satisfies RebalanceProposal['proposedTrades'][number]
     })
+    .filter((trade): trade is NonNullable<typeof trade> => Boolean(trade))
 
   if (proposedTrades.length === 0) {
     for (const risk of args.riskReport.concentrationRisks) {
       const holding = args.holdings.find((row) => row.ticker === risk.ticker)
-      const quote = args.researchSummaries.find((summary) => summary.ticker === risk.ticker)?.quote?.price ?? 0
+      const quote = args.researchSummaries.find((summary) => summary.ticker === risk.ticker)?.quote?.price ?? null
+      if (quote === null) continue
       const targetValue = totalValue * risk.threshold
       const targetShares = quote > 0 ? Math.round(targetValue / quote) : holding?.shares ?? 0
 
@@ -331,6 +523,7 @@ function buildRebalanceProposal(args: {
       'Market prices may move before simulated execution is evaluated.',
       'Research coverage may contain explicit data gaps for one or more holdings.',
       'Policy targets may be incomplete if allocation_targets are only partially configured.',
+      'Trades are omitted for holdings without reliable quote data at run time.',
     ],
     dataSources: Array.from(new Set(args.researchSummaries.flatMap((summary) => summary.dataSources))),
     confidenceLevel:
@@ -347,27 +540,70 @@ function buildRebalanceProposal(args: {
   }
 }
 
-async function appendPipelineError(decisionId: string, message: string) {
-  const supabase = await createClient()
+async function appendPipelineError(
+  decisionId: string,
+  step: string,
+  message: string,
+  supabase: AppSupabaseClient
+) {
   const { data: existing } = await supabase
     .from('agent_decisions')
     .select('error_log')
     .eq('id', decisionId)
-    .maybeSingle<{ error_log: object[] | null }>()
+    .maybeSingle<{ error_log: PipelineErrorEntry[] | null }>()
 
-  const nextErrors = [...(existing?.error_log ?? []), { at: nowIso(), message }]
+  const nextErrors = [...(existing?.error_log ?? []), { at: nowIso(), step, message }]
 
-  await supabase
+  const { error } = await supabase
     .from('agent_decisions')
     .update({ error_log: nextErrors })
     .eq('id', decisionId)
+
+  if (error) {
+    throw new Error(error.message)
+  }
+}
+
+async function updateDecisionStep(
+  decisionId: string,
+  payload: Record<string, unknown>,
+  supabase: AppSupabaseClient
+): Promise<void> {
+  const { error } = await supabase
+    .from('agent_decisions')
+    .update(payload)
+    .eq('id', decisionId)
+
+  if (error) {
+    throw new Error(error.message)
+  }
 }
 
 export async function runPortfolioAnalysisPipeline(
   userId: string,
-  portfolioId: string
+  portfolioId: string,
+  supabaseClient?: AppSupabaseClient
 ): Promise<PipelineResult> {
-  const supabase = await createClient()
+  const supabase = supabaseClient ?? (await createClient())
+  const pipelineStartedAt = Date.now()
+  const stageDurations = createEmptyStageDurations()
+  let currentStep = 'validate_portfolio'
+
+  const { data: ownedPortfolio, error: portfolioError } = await supabase
+    .from('portfolios')
+    .select('id')
+    .eq('id', portfolioId)
+    .eq('user_id', userId)
+    .is('archived_at', null)
+    .maybeSingle<PortfolioOwnershipRow>()
+
+  if (portfolioError) {
+    throw new Error(portfolioError.message)
+  }
+
+  if (!ownedPortfolio) {
+    throw new Error('Portfolio not found for this user.')
+  }
 
   const [{ data: holdingsRows, error: holdingsError }, { data: policiesRows, error: policiesError }, { data: targetsRows, error: targetsError }] =
     await Promise.all([
@@ -403,6 +639,7 @@ export async function runPortfolioAnalysisPipeline(
   const policies = policiesRows ?? []
   const targets = targetsRows ?? []
 
+  const decisionWriteStartedAt = Date.now()
   const { data: decisionRow, error: decisionError } = await supabase
     .from('agent_decisions')
     .insert({
@@ -416,6 +653,7 @@ export async function runPortfolioAnalysisPipeline(
       proposal: null,
       proposal_status: 'pending',
       agent_mode: 'parallel',
+      stage_durations: null,
       error_log: null,
     })
     .select('id, run_at')
@@ -424,10 +662,13 @@ export async function runPortfolioAnalysisPipeline(
   if (decisionError || !decisionRow) {
     throw new Error(decisionError?.message ?? 'Failed to create initial agent_decisions record.')
   }
+  stageDurations.decisionWriteMs = elapsedMs(decisionWriteStartedAt)
 
   const decisionId = decisionRow.id
 
   try {
+    currentStep = 'load_cash_balance'
+    const cashBalanceStartedAt = Date.now()
     const { data: cashRow, error: cashError } = await supabase
       .from('cash_balance')
       .select('*')
@@ -438,39 +679,45 @@ export async function runPortfolioAnalysisPipeline(
     if (cashError) {
       throw new Error(cashError.message)
     }
+    stageDurations.cashBalanceMs = elapsedMs(cashBalanceStartedAt)
 
     const tickers = holdings.map((holding) => holding.ticker)
-    const researchSummaries = await analyzePortfolio(tickers, buildStockContext)
+    currentStep = 'research'
+    const researchStartedAt = Date.now()
+    const researchResult = await analyzePortfolioWithTelemetry(tickers, buildStockContext)
+    stageDurations.researchMs = elapsedMs(researchStartedAt)
+    stageDurations.perTicker = researchResult.stageDurations
+    const researchSummaries = researchResult.summaries
 
-    await supabase
-      .from('agent_decisions')
-      .update({ research_summaries: researchSummaries })
-      .eq('id', decisionId)
+    await updateDecisionStep(decisionId, { research_summaries: researchSummaries }, supabase)
 
+    currentStep = 'policy_assessment'
+    const policyAssessmentStartedAt = Date.now()
     const policyAssessment = buildPolicyAssessment({
       holdings,
       targets,
       policies,
       researchSummaries,
+      cashBalance: parseNumber(cashRow?.amount),
     })
+    stageDurations.policyAssessmentMs = elapsedMs(policyAssessmentStartedAt)
 
-    await supabase
-      .from('agent_decisions')
-      .update({ policy_assessment: policyAssessment })
-      .eq('id', decisionId)
+    await updateDecisionStep(decisionId, { policy_assessment: policyAssessment }, supabase)
 
+    currentStep = 'risk_report'
+    const riskReportStartedAt = Date.now()
     const riskReport = buildRiskReport({
       holdings,
       cashBalance: parseNumber(cashRow?.amount),
       researchSummaries,
       policies,
     })
+    stageDurations.riskReportMs = elapsedMs(riskReportStartedAt)
 
-    await supabase
-      .from('agent_decisions')
-      .update({ risk_report: riskReport })
-      .eq('id', decisionId)
+    await updateDecisionStep(decisionId, { risk_report: riskReport }, supabase)
 
+    currentStep = 'rebalance_proposal'
+    const proposalBuildStartedAt = Date.now()
     const proposal =
       policyAssessment.overallStatus !== 'healthy' || riskReport.overallRiskLevel !== 'low'
         ? buildRebalanceProposal({
@@ -481,11 +728,23 @@ export async function runPortfolioAnalysisPipeline(
             riskReport,
           })
         : null
+    stageDurations.proposalBuildMs = elapsedMs(proposalBuildStartedAt)
 
-    await supabase
-      .from('agent_decisions')
-      .update({ proposal })
-      .eq('id', decisionId)
+    const proposalWriteStartedAt = Date.now()
+    await updateDecisionStep(
+      decisionId,
+      {
+        proposal,
+        stage_durations: finalizeStageDurations(stageDurations, pipelineStartedAt),
+      },
+      supabase
+    )
+    stageDurations.proposalWriteMs = elapsedMs(proposalWriteStartedAt)
+    await updateDecisionStep(
+      decisionId,
+      { stage_durations: finalizeStageDurations(stageDurations, pipelineStartedAt) },
+      supabase
+    )
 
     return {
       decisionId,
@@ -493,11 +752,17 @@ export async function runPortfolioAnalysisPipeline(
       policyAssessment,
       riskReport,
       researchSummaries,
+      stageDurations: finalizeStageDurations(stageDurations, pipelineStartedAt),
       ranAt: decisionRow.run_at,
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    await appendPipelineError(decisionId, message)
+    await updateDecisionStep(
+      decisionId,
+      { stage_durations: finalizeStageDurations(stageDurations, pipelineStartedAt) },
+      supabase
+    )
+    await appendPipelineError(decisionId, currentStep, message, supabase)
     throw error
   }
 }
