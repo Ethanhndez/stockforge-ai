@@ -30,7 +30,22 @@ import type {
   QuoteResult,
 } from '@/lib/tools'
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+interface AnthropicClientLike {
+  messages: {
+    create: (args: {
+      model: string
+      max_tokens: number
+      system: string
+      messages: Array<{ role: 'user'; content: string }>
+    }) => Promise<Anthropic.Message>
+  }
+}
+
+function createAnthropicClient(): AnthropicClientLike {
+  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+}
+
+let anthropicClient: AnthropicClientLike = createAnthropicClient()
 
 export interface StockFundamentalsContext {
   companyProfile: CompanyProfileResult
@@ -222,6 +237,25 @@ function elapsedMs(startedAt: number): number {
   return Date.now() - startedAt
 }
 
+function buildDataSourceList(args: {
+  ticker: string
+  contextDataSources: string[]
+  synthesisDataSources: string[]
+  ragSources: string[]
+}): string[] {
+  const combined = Array.from(
+    new Set([
+      ...args.contextDataSources,
+      ...args.synthesisDataSources,
+      ...args.ragSources,
+    ].filter((source) => source.trim().length > 0))
+  )
+
+  return combined.length > 0
+    ? combined
+    : [`Source attribution missing for ${args.ticker}; investigation required.`]
+}
+
 function buildResearchSummary(
   ticker: string,
   context: StockContext,
@@ -232,6 +266,23 @@ function buildResearchSummary(
   const quote = context.priceHistory.latestQuote ?? null
   const fundamentals = context.fundamentals.company ?? null
   const news = context.news.headlines.slice(0, 10)
+  const dataSources = buildDataSourceList({
+    ticker,
+    contextDataSources: context.dataSources,
+    synthesisDataSources: synthesis.data_sources,
+    ragSources: posture.rag_sources,
+  })
+  const dataGaps = Array.from(
+    new Set([
+      ...result.fundamental.dataGaps,
+      ...result.technical.dataGaps,
+      ...result.sentiment.dataGaps,
+      ...(posture.data_gaps ?? []),
+      ...(dataSources.some((source) => source.startsWith('Source attribution missing for '))
+        ? ['Source attribution had to be repaired because no explicit data sources were returned.']
+        : []),
+    ])
+  )
 
   return {
     ticker,
@@ -254,16 +305,9 @@ function buildResearchSummary(
         ...result.technical.risks,
         ...result.sentiment.risks,
       ]).slice(0, 5),
-    dataGaps: Array.from(
-      new Set([
-        ...result.fundamental.dataGaps,
-        ...result.technical.dataGaps,
-        ...result.sentiment.dataGaps,
-        ...(posture.data_gaps ?? []),
-      ])
-    ),
+    dataGaps,
     fetchedAt: context.fetchedAt,
-    dataSources: context.dataSources,
+    dataSources,
   }
 }
 
@@ -329,7 +373,7 @@ async function requestJsonFromAgent<T>(
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const attemptStartedAt = Date.now()
-    const response = await anthropic.messages.create({
+    const response = await anthropicClient.messages.create({
       model,
       max_tokens: maxTokens,
       system: systemPrompt,
@@ -724,4 +768,8 @@ export async function analyzePortfolio(
 ): Promise<ResearchSummary[]> {
   const result = await analyzePortfolioWithTelemetry(tickers, getContext)
   return result.summaries
+}
+
+export function setAnthropicClientForTests(client: AnthropicClientLike | null): void {
+  anthropicClient = client ?? createAnthropicClient()
 }

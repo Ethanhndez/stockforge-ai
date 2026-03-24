@@ -8,7 +8,7 @@ import type {
   ResearchSummary,
 } from '@/lib/portfolio/agentTypes'
 import { optimizePortfolio } from '@/lib/ai/optimizationClient'
-import { createClient, type AppSupabaseClient } from '@/lib/supabase/server'
+import type { AppSupabaseClient } from '@/lib/supabase/server'
 import type { HoldingRecord } from '@/lib/portfolio/types'
 
 interface AllocationTargetRow {
@@ -69,11 +69,16 @@ interface HoldingSnapshot extends HoldingRecord {
 export interface PipelineResult {
   decisionId: string
   proposal: RebalanceProposal | null
+  proposalProduced: true | null
   policyAssessment: PolicyAssessment
   riskReport: PortfolioRiskReport
   researchSummaries: ResearchSummary[]
   stageDurations: PipelineStageDurations
   ranAt: string
+}
+
+interface PipelineDependencies {
+  analyzePortfolioWithTelemetry?: typeof analyzePortfolioWithTelemetry
 }
 
 function parseNumber(value: number | string | null | undefined): number {
@@ -582,9 +587,17 @@ async function updateDecisionStep(
 export async function runPortfolioAnalysisPipeline(
   userId: string,
   portfolioId: string,
-  supabaseClient?: AppSupabaseClient
+  supabaseClient?: AppSupabaseClient,
+  dependencies: PipelineDependencies = {}
 ): Promise<PipelineResult> {
-  const supabase = supabaseClient ?? (await createClient())
+  if (!supabaseClient) {
+    throw new Error(
+      'Authenticated Supabase client is required. Routes must create the client and thread it into the pipeline.'
+    )
+  }
+
+  const supabase = supabaseClient
+  const analyzePortfolio = dependencies.analyzePortfolioWithTelemetry ?? analyzePortfolioWithTelemetry
   const pipelineStartedAt = Date.now()
   const stageDurations = createEmptyStageDurations()
   let currentStep = 'validate_portfolio'
@@ -684,7 +697,7 @@ export async function runPortfolioAnalysisPipeline(
     const tickers = holdings.map((holding) => holding.ticker)
     currentStep = 'research'
     const researchStartedAt = Date.now()
-    const researchResult = await analyzePortfolioWithTelemetry(tickers, buildStockContext)
+    const researchResult = await analyzePortfolio(tickers, buildStockContext)
     stageDurations.researchMs = elapsedMs(researchStartedAt)
     stageDurations.perTicker = researchResult.stageDurations
     const researchSummaries = researchResult.summaries
@@ -749,6 +762,7 @@ export async function runPortfolioAnalysisPipeline(
     return {
       decisionId,
       proposal,
+      proposalProduced: proposal ? true : null,
       policyAssessment,
       riskReport,
       researchSummaries,
