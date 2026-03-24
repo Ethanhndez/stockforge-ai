@@ -9,6 +9,7 @@
     "lint": "eslint",
     "security-scan": "npx ecc-agentshield scan",
     "prepare": "husky",
+    "ruflo:start": "npx ruflo@latest mcp start --config .ruflo/config.json",
     "test:fixtures": "NEXT_PUBLIC_USE_FIXTURES=true next dev",
     "test:types": "tsc --noEmit",
     "test:lint": "eslint src/",
@@ -23,7 +24,8 @@
     "next": "16.1.7",
     "openai": "^6.32.0",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.1",
