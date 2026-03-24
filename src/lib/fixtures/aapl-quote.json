@@ -1,0 +1,8 @@
+{
+  "ticker": "AAPL",
+  "price": 227.48,
+  "change": 2.13,
+  "changePercent": 0.9449,
+  "barTimestamp": "2026-03-20T20:00:00.000Z",
+  "fetchedAt": "2026-03-21T00:00:00.000Z"
+}

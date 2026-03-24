@@ -36,6 +36,20 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local workspace and generated artifacts
+.next-worktree/
+.ruflo/
+supabase/.temp/
+.claude/launch.json
+.claude/memory/
+.claude/security/
+.claude/worktrees/
+StockForge-Second-Brain/
+Stock Research App/
+Ethan_Hernandez_Resume_2026.docx
+graduation-sprint-plan.md
+strategic-roadmap-2026-2029.md
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

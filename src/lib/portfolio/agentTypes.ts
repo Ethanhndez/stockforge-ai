@@ -4,8 +4,30 @@ import type {
   QuoteResult as QuoteData,
 } from '@/lib/tools'
 
+export interface ResearchTickerStageDurations {
+  contextMs: number
+  fundamentalMs: number
+  technicalMs: number
+  sentimentMs: number
+  synthesisMs: number
+  totalMs: number
+}
+
+export interface PipelineStageDurations {
+  totalMs: number
+  decisionWriteMs: number
+  cashBalanceMs: number
+  researchMs: number
+  policyAssessmentMs: number
+  riskReportMs: number
+  proposalBuildMs: number
+  proposalWriteMs: number
+  perTicker: Record<string, ResearchTickerStageDurations>
+}
+
 export interface ResearchSummary {
   ticker: string
+  summary?: string
   quote: QuoteData | null
   fundamentals: FundamentalsData | null
   news: NewsItem[]
@@ -15,6 +37,7 @@ export interface ResearchSummary {
   dataGaps: string[]
   fetchedAt: string
   dataSources: string[]
+  parseError?: boolean
 }
 
 export interface DriftItem {
@@ -98,5 +121,6 @@ export interface DecisionLogEntry {
   proposal: RebalanceProposal | null
   proposalStatus: 'pending' | 'accepted' | 'rejected' | 'expired'
   agentMode: string
+  stageDurations: PipelineStageDurations | null
   errorLog: object[] | null
 }

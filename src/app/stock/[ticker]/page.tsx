@@ -1,29 +1,32 @@
-// ============================================================
-// src/app/stock/[ticker]/page.tsx
-// Stock detail page — Server Component
-//
-// Architecture:
-//  - Fetches stock quote server-side (fast, < 1s → page renders immediately)
-//  - AI analysis is loaded client-side via <AnalysisSection> (20-40s, shows loading state)
-// ============================================================
-
+import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import Navbar from '@/components/Navbar'
 import AnalysisSection from '@/components/AnalysisSection'
 import WatchlistButton from '@/components/WatchlistButton'
-
-// ── Types ───────────────────────────────────────────────────
+import { PolygonBadge } from '@/components/PolygonBadge'
 
 interface QuoteData {
   ticker: string
   price: number
   change: number
   changePercent: string
-  barTimestamp: string   // when the trading bar occurred (ISO 8601) — from Polygon t field
-  fetchedAt: string      // when our server received the response
+  barTimestamp: string
+  fetchedAt: string
 }
 
-// ── Helpers ─────────────────────────────────────────────────
+interface FundamentalsData {
+  ticker: string
+  name: string
+  marketCap: number | null
+  peRatio: number | null
+  revenueLastYear: number | null
+  dilutedEPS: number | null
+  employees: number | null
+  sector: string | null
+  industry: string | null
+  description: string | null
+  fetchedAt: string
+}
 
 function formatPrice(n: number): string {
   return n.toLocaleString('en-US', {
@@ -32,26 +35,43 @@ function formatPrice(n: number): string {
   })
 }
 
+function formatCompactCurrency(n: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(n)
+}
+
+function formatCompactNumber(n: number): string {
+  return new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(n)
+}
+
+function formatDecimal(n: number): string {
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format(n)
+}
+
 function isPositive(change: number): boolean {
   return change >= 0
 }
 
-// Ensure changePercent is always displayed as e.g. "0.28%" not "0.28361198706888135"
 function formatChangePct(raw: string | number): string {
   const n = typeof raw === 'string' ? parseFloat(raw.replace('%', '')) : raw
   if (isNaN(n)) return '—'
   return `${Math.abs(n).toFixed(2)}%`
 }
 
-// ── Data fetching (server-side) ──────────────────────────────
-
 async function getQuote(ticker: string): Promise<QuoteData | null> {
   try {
-    // Use absolute URL — required in Server Components
-    const baseUrl =
-      process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'
     const res = await fetch(`${baseUrl}/api/quote?ticker=${ticker}`, {
-      // Don't cache — always get fresh price data
       cache: 'no-store',
     })
     if (!res.ok) return null
@@ -61,7 +81,62 @@ async function getQuote(ticker: string): Promise<QuoteData | null> {
   }
 }
 
-// ── Page Component ───────────────────────────────────────────
+async function getFundamentals(ticker: string): Promise<FundamentalsData | null> {
+  try {
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'
+    const res = await fetch(`${baseUrl}/api/fundamentals?ticker=${ticker}`, {
+      cache: 'no-store',
+    })
+    if (!res.ok) return null
+    return res.json()
+  } catch {
+    return null
+  }
+}
+
+function FundamentalsCell({
+  label,
+  value,
+  accent,
+}: {
+  label: string
+  value: string
+  accent?: boolean
+}) {
+  return (
+    <div
+      style={{
+        padding: '16px 16px',
+        borderRadius: 22,
+        border: '1px solid var(--border)',
+        background: 'var(--bg-panel)',
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          color: 'var(--text-dim)',
+          letterSpacing: '0.14em',
+          textTransform: 'uppercase',
+          marginBottom: 8,
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: 20,
+          fontWeight: 700,
+          color: accent ? 'var(--purple)' : 'var(--text)',
+          letterSpacing: '-0.04em',
+          fontFamily: 'var(--font-dm-mono, monospace)',
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  )
+}
 
 export default async function StockPage({
   params,
@@ -71,7 +146,10 @@ export default async function StockPage({
   const { ticker } = await params
   const upper = ticker.toUpperCase()
 
-  const quote = await getQuote(upper)
+  const [quote, fundamentals] = await Promise.all([
+    getQuote(upper),
+    getFundamentals(upper),
+  ])
 
   if (!quote) {
     notFound()
@@ -88,12 +166,11 @@ export default async function StockPage({
 
       <main
         style={{
-          maxWidth: 900,
+          maxWidth: 1080,
           margin: '0 auto',
           padding: '32px 24px 80px',
         }}
       >
-        {/* ── Breadcrumb ───────────────────────────────────── */}
         <div
           style={{
             display: 'flex',
@@ -104,54 +181,60 @@ export default async function StockPage({
             color: 'var(--text-dim)',
           }}
         >
-          <a
+          <Link
             href="/"
             style={{ color: 'var(--text-muted)', textDecoration: 'none' }}
           >
             Home
-          </a>
+          </Link>
           <span>/</span>
           <span style={{ color: 'var(--text)' }}>{upper}</span>
         </div>
 
-        {/* ── Price Header ─────────────────────────────────── */}
         <div
           style={{
             display: 'flex',
             alignItems: 'flex-start',
             justifyContent: 'space-between',
             flexWrap: 'wrap',
-            gap: 16,
-            marginBottom: 32,
+            gap: 20,
+            marginBottom: 24,
+            padding: '26px',
+            borderRadius: 30,
+            border: '1px solid var(--border)',
+            background:
+              'linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 94%, transparent), color-mix(in srgb, var(--bg-panel) 94%, transparent))',
+            boxShadow: 'var(--shadow-strong)',
+            backdropFilter: 'blur(16px)',
           }}
         >
           <div>
-            {/* Ticker badge */}
             <div
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 8,
                 marginBottom: 12,
+                flexWrap: 'wrap',
               }}
             >
               <span
                 style={{
-                  background: 'var(--accent)',
+                  background: 'linear-gradient(135deg, var(--accent), #f7dd63)',
                   color: '#000',
-                  padding: '3px 10px',
-                  borderRadius: 4,
-                  fontSize: 13,
+                  padding: '5px 12px',
+                  borderRadius: 999,
+                  fontSize: 12,
                   fontWeight: 700,
                   fontFamily: 'var(--font-dm-mono, monospace)',
-                  letterSpacing: '0.06em',
+                  letterSpacing: '0.16em',
                 }}
               >
                 {upper}
               </span>
+              <PolygonBadge fetchedAt={quote.fetchedAt} />
             </div>
 
-            {/* Big price */}
             <div
               style={{
                 display: 'flex',
@@ -162,18 +245,17 @@ export default async function StockPage({
             >
               <span
                 style={{
-                  fontSize: 48,
+                  fontSize: 'clamp(42px, 6vw, 64px)',
                   fontWeight: 700,
                   fontFamily: 'var(--font-dm-mono, monospace)',
                   color: 'var(--text)',
-                  letterSpacing: '-0.02em',
+                  letterSpacing: '-0.05em',
                   lineHeight: 1,
                 }}
               >
                 ${formatPrice(quote.price)}
               </span>
 
-              {/* Change badge */}
               <span
                 style={{
                   display: 'inline-flex',
@@ -181,11 +263,12 @@ export default async function StockPage({
                   gap: 6,
                   background: changeBg,
                   color: changeColor,
-                  padding: '4px 12px',
-                  borderRadius: 6,
-                  fontSize: 15,
+                  padding: '7px 14px',
+                  borderRadius: 999,
+                  fontSize: 13,
                   fontWeight: 600,
                   fontFamily: 'var(--font-dm-mono, monospace)',
+                  letterSpacing: '0.08em',
                 }}
               >
                 {arrow} {positive ? '+' : ''}
@@ -193,7 +276,6 @@ export default async function StockPage({
               </span>
             </div>
 
-            {/* Timestamp */}
             <p
               style={{
                 marginTop: 8,
@@ -212,32 +294,145 @@ export default async function StockPage({
             </p>
           </div>
 
-          {/* Compare + Watchlist buttons */}
           <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-            <a
+            <Link
               href={`/compare?a=${upper}`}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 6,
-                padding: '9px 16px',
-                borderRadius: 8,
+                padding: '11px 16px',
+                borderRadius: 999,
                 background: 'var(--bg-card)',
                 border: '1px solid var(--border)',
-                color: 'var(--text-muted)',
-                fontSize: 13,
-                fontWeight: 500,
+                color: 'var(--text)',
+                fontSize: 12,
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
                 textDecoration: 'none',
                 cursor: 'pointer',
+                boxShadow: 'var(--shadow-soft)',
               }}
             >
               ⇄ Compare
-            </a>
+            </Link>
             <WatchlistButton ticker={upper} />
           </div>
         </div>
 
-        {/* ── Divider ──────────────────────────────────────── */}
+        {fundamentals ? (
+          <section
+            style={{
+              marginBottom: 32,
+              padding: '24px',
+              borderRadius: 30,
+              border: '1px solid var(--border)',
+              background:
+                'linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 94%, transparent), color-mix(in srgb, var(--bg-panel) 94%, transparent))',
+              boxShadow: 'var(--shadow-soft)',
+              backdropFilter: 'blur(14px)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: 'space-between',
+                gap: 16,
+                flexWrap: 'wrap',
+                marginBottom: 18,
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--purple)',
+                    letterSpacing: '0.16em',
+                    textTransform: 'uppercase',
+                    fontWeight: 700,
+                  }}
+                >
+                  Fundamentals
+                </div>
+                <h2
+                  style={{
+                    margin: '10px 0 6px',
+                    fontSize: 'clamp(28px, 4vw, 40px)',
+                    letterSpacing: '-0.05em',
+                  }}
+                >
+                  {fundamentals.name}
+                </h2>
+                <p
+                  style={{
+                    margin: 0,
+                    color: 'var(--text-muted)',
+                    fontSize: 14,
+                    lineHeight: 1.8,
+                    maxWidth: 720,
+                  }}
+                >
+                  {fundamentals.description || 'No company description available.'}
+                </p>
+              </div>
+
+              <PolygonBadge fetchedAt={fundamentals.fetchedAt} />
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                gap: 12,
+              }}
+            >
+              <FundamentalsCell
+                label="Market Cap"
+                value={
+                  fundamentals.marketCap !== null
+                    ? formatCompactCurrency(fundamentals.marketCap)
+                    : '—'
+                }
+                accent
+              />
+              <FundamentalsCell
+                label="P/E Ratio"
+                value={fundamentals.peRatio !== null ? `${formatDecimal(fundamentals.peRatio)}x` : '—'}
+              />
+              <FundamentalsCell
+                label="Diluted EPS"
+                value={
+                  fundamentals.dilutedEPS !== null
+                    ? `$${formatDecimal(fundamentals.dilutedEPS)}`
+                    : '—'
+                }
+              />
+              <FundamentalsCell
+                label="Revenue"
+                value={
+                  fundamentals.revenueLastYear !== null
+                    ? formatCompactCurrency(fundamentals.revenueLastYear)
+                    : '—'
+                }
+              />
+              <FundamentalsCell
+                label="Employees"
+                value={
+                  fundamentals.employees !== null
+                    ? formatCompactNumber(fundamentals.employees)
+                    : '—'
+                }
+              />
+              <FundamentalsCell
+                label="Sector"
+                value={fundamentals.sector || fundamentals.industry || '—'}
+              />
+            </div>
+          </section>
+        ) : null}
+
         <div
           style={{
             height: 1,
@@ -246,10 +441,7 @@ export default async function StockPage({
           }}
         />
 
-        {/* ── AI Analysis Section (Client Component) ───────── */}
-        {/* This renders immediately as a loading skeleton,      */}
-        {/* then fills in when the AI agent completes.           */}
-        <AnalysisSection ticker={upper} />
+        <AnalysisSection key={upper} ticker={upper} />
       </main>
     </>
   )

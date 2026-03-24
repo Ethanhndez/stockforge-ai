@@ -1,0 +1,23 @@
+{
+  "ticker": "AAPL",
+  "results": [
+    {
+      "id": "apple-news-1",
+      "title": "Apple expands on-device AI features across flagship products",
+      "publishedAt": "2026-03-20T14:30:00.000Z",
+      "source": "FixtureWire",
+      "url": "https://example.com/apple-ai",
+      "tickers": ["AAPL"]
+    },
+    {
+      "id": "apple-news-2",
+      "title": "Services growth remains central to Apple's margin story",
+      "publishedAt": "2026-03-19T16:00:00.000Z",
+      "source": "FixtureWire",
+      "url": "https://example.com/apple-services",
+      "tickers": ["AAPL"]
+    }
+  ],
+  "count": 2,
+  "fetchedAt": "2026-03-21T00:00:00.000Z"
+}

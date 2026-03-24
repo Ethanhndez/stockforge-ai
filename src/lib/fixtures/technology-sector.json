@@ -1,0 +1,57 @@
+{
+  "sector": "Technology",
+  "trending": [
+    {
+      "ticker": "AAPL",
+      "name": "Apple",
+      "price": 227.48,
+      "change": 2.13,
+      "changePct": 0.94,
+      "absChangePct": 0.9449,
+      "volume": 60234567,
+      "sparkline": [221.1, 222.8, 223.4, 224.2, 225.5, 226.0, 227.48]
+    },
+    {
+      "ticker": "NVDA",
+      "name": "NVIDIA",
+      "price": 912.35,
+      "change": 14.28,
+      "changePct": 1.59,
+      "absChangePct": 1.589,
+      "volume": 48123456,
+      "sparkline": [875.1, 882.3, 889.5, 895.2, 901.7, 907.8, 912.35]
+    },
+    {
+      "ticker": "MSFT",
+      "name": "Microsoft",
+      "price": 438.62,
+      "change": 3.74,
+      "changePct": 0.86,
+      "absChangePct": 0.861,
+      "volume": 22145678,
+      "sparkline": [431.9, 433.2, 434.0, 435.8, 436.7, 437.5, 438.62]
+    },
+    {
+      "ticker": "AMD",
+      "name": "AMD",
+      "price": 181.44,
+      "change": -1.66,
+      "changePct": -0.91,
+      "absChangePct": 0.907,
+      "volume": 39214567,
+      "sparkline": [186.4, 185.7, 184.9, 183.8, 182.9, 182.1, 181.44]
+    },
+    {
+      "ticker": "GOOGL",
+      "name": "Alphabet",
+      "price": 173.2,
+      "change": 1.18,
+      "changePct": 0.69,
+      "absChangePct": 0.686,
+      "volume": 18934567,
+      "sparkline": [169.9, 170.2, 170.8, 171.6, 172.1, 172.8, 173.2]
+    }
+  ],
+  "totalFetched": 5,
+  "fetchedAt": "2026-03-21T00:00:00.000Z"
+}

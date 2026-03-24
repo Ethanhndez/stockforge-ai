@@ -59,9 +59,40 @@ interface LoadingStateProps {
   elapsed: number      // elapsed seconds, tracked by parent
 }
 
+function IdleState({
+  ticker,
+  onStart,
+}: {
+  ticker: string
+  onStart: () => void
+}) {
+  return (
+    <div style={styles.idleCard}>
+      <div style={styles.loadingEyebrow}>PhD-level research available</div>
+      <h3 style={styles.loadingTitle}>Start the full AI analyst workflow</h3>
+      <p style={styles.loadingSubtitle}>
+        You already have the quick price and fundamentals view. Run the deeper
+        research layer when you want filing review, bull and bear framing, key
+        risks, and analyst-style synthesis for {ticker}.
+      </p>
+
+      <div style={styles.idleBulletList}>
+        <div style={styles.idleBullet}>SEC filings and recent news review</div>
+        <div style={styles.idleBullet}>Bull case, bear case, and key risks</div>
+        <div style={styles.idleBullet}>Plain-English summary plus deeper brief</div>
+      </div>
+
+      <button type="button" style={styles.startButton} onClick={onStart}>
+        Run AI Analysis
+      </button>
+    </div>
+  )
+}
+
 function LoadingState({ steps, elapsed }: LoadingStateProps) {
   return (
     <div style={styles.loadingCard}>
+      <div style={styles.loadingEyebrow}>AI research stream</div>
       {/* Animated pulse ring */}
       <div style={styles.pulseRing}>
         <div style={styles.pulseInner}>
@@ -132,19 +163,18 @@ function LoadingState({ steps, elapsed }: LoadingStateProps) {
 export default function AnalysisSection({ ticker }: { ticker: string }) {
   const [analysis, setAnalysis] = useState<Analysis | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-  // SSE-driven live steps — each entry is a step label as it arrives
+  const [loading, setLoading] = useState(false)
+  const [started, setStarted] = useState(false)
   const [liveSteps, setLiveSteps] = useState<string[]>([])
   const [elapsed, setElapsed] = useState(0)
 
   useEffect(() => {
-    // Elapsed seconds counter — starts immediately so user sees time moving
+    if (!started) return
+
     const interval = setInterval(() => setElapsed((e) => e + 1), 1000)
 
     async function streamAnalysis() {
-      // Track whether a 'complete' or 'error' event was received.
-      // Cannot use the loading React state here — closures capture the
-      // initial value (true) and React state updates don't mutate it.
+      setLoading(true)
       let completed = false
 
       try {
@@ -196,7 +226,17 @@ export default function AnalysisSection({ ticker }: { ticker: string }) {
               const event = JSON.parse(line.slice(6))
 
               if (event.type === 'progress') {
-                setLiveSteps((prev) => [...prev, event.step as string])
+                if (event.done) {
+                  continue
+                }
+
+                setLiveSteps((prev) => {
+                  const nextStep = event.step as string
+                  if (prev[prev.length - 1] === nextStep) {
+                    return prev
+                  }
+                  return [...prev, nextStep]
+                })
               } else if (event.type === 'complete') {
                 completed = true
                 setAnalysis(event.analysis as Analysis)
@@ -230,7 +270,23 @@ export default function AnalysisSection({ ticker }: { ticker: string }) {
     streamAnalysis()
 
     return () => clearInterval(interval)
-  }, [ticker]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [started, ticker])
+
+  if (!started) {
+    return (
+      <IdleState
+        ticker={ticker}
+        onStart={() => {
+          setError(null)
+          setAnalysis(null)
+          setLiveSteps([])
+          setElapsed(0)
+          setLoading(true)
+          setStarted(true)
+        }}
+      />
+    )
+  }
 
   if (loading) return <LoadingState steps={liveSteps} elapsed={elapsed} />
 
@@ -238,8 +294,8 @@ export default function AnalysisSection({ ticker }: { ticker: string }) {
     return (
       <div style={styles.errorCard}>
         <span style={{ fontSize: 28 }}>⚠</span>
-        <h3 style={{ color: 'var(--red)', marginTop: 12, fontSize: 16 }}>Analysis Error</h3>
-        <p style={{ color: 'var(--text-muted)', marginTop: 8, fontSize: 14 }}>{error}</p>
+        <h3 style={{ color: 'var(--red)', margin: '12px 0 0', fontSize: 18 }}>Analysis Error</h3>
+        <p style={{ color: 'var(--text-muted)', margin: '8px 0 0', fontSize: 14 }}>{error}</p>
       </div>
     )
   }
@@ -472,26 +528,77 @@ function FinancialCell({
 // ============================================================
 
 const styles: Record<string, React.CSSProperties> = {
+  idleCard: {
+    background:
+      'linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 94%, transparent), color-mix(in srgb, var(--bg-panel) 92%, transparent))',
+    border: '1px solid var(--border)',
+    borderRadius: 30,
+    padding: '34px 32px',
+    marginTop: 24,
+    boxShadow: 'var(--shadow-strong)',
+    backdropFilter: 'blur(16px)',
+  },
+  idleBulletList: {
+    display: 'grid',
+    gap: 10,
+    marginTop: 20,
+    marginBottom: 22,
+  },
+  idleBullet: {
+    padding: '12px 14px',
+    borderRadius: 16,
+    border: '1px solid var(--border)',
+    background: 'var(--bg-panel)',
+    color: 'var(--text-muted)',
+    fontSize: 13,
+    lineHeight: 1.6,
+  },
+  startButton: {
+    border: 'none',
+    borderRadius: 20,
+    padding: '16px 20px',
+    background: 'linear-gradient(135deg, var(--accent), #f7dd63)',
+    color: '#16120a',
+    fontSize: 12,
+    fontWeight: 800,
+    letterSpacing: '0.12em',
+    textTransform: 'uppercase' as const,
+    cursor: 'pointer',
+    boxShadow: '0 14px 30px rgba(243, 198, 35, 0.22)',
+  },
   // Loading
   loadingCard: {
-    background: 'var(--bg-card)',
+    background:
+      'linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 94%, transparent), color-mix(in srgb, var(--bg-panel) 92%, transparent))',
     border: '1px solid var(--border)',
-    borderRadius: 12,
-    padding: '40px 32px',
+    borderRadius: 30,
+    padding: '44px 34px',
     textAlign: 'center',
     marginTop: 24,
+    boxShadow: 'var(--shadow-strong)',
+    backdropFilter: 'blur(16px)',
+  },
+  loadingEyebrow: {
+    marginBottom: 18,
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: '0.16em',
+    textTransform: 'uppercase' as const,
+    color: 'var(--purple)',
   },
   pulseRing: {
-    width: 64,
-    height: 64,
+    width: 78,
+    height: 78,
     borderRadius: '50%',
-    border: '2px solid var(--accent)',
+    border: '1px solid color-mix(in srgb, var(--accent) 70%, white 10%)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    margin: '0 auto 20px',
+    margin: '0 auto 22px',
     animation: 'pulse 2s infinite',
-    boxShadow: '0 0 24px rgba(245,196,0,0.2)',
+    boxShadow: '0 0 32px rgba(243, 198, 35, 0.18)',
+    background:
+      'radial-gradient(circle at center, rgba(243, 198, 35, 0.12), rgba(111, 61, 244, 0.1))',
   },
   pulseInner: {
     display: 'flex',
@@ -499,19 +606,21 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'center',
   },
   loadingTitle: {
-    fontSize: 18,
-    fontWeight: 600,
+    fontSize: 22,
+    fontWeight: 700,
     color: 'var(--text)',
     marginBottom: 8,
+    letterSpacing: '-0.03em',
   },
   loadingSubtitle: {
-    fontSize: 13,
+    fontSize: 14,
     color: 'var(--text-muted)',
     marginBottom: 28,
+    lineHeight: 1.7,
   },
   stepList: {
     textAlign: 'left',
-    maxWidth: 360,
+    maxWidth: 440,
     margin: '0 auto 20px',
     display: 'flex',
     flexDirection: 'column',
@@ -521,9 +630,13 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     gap: 10,
+    padding: '11px 14px',
+    borderRadius: 16,
+    background: 'var(--bg-panel)',
+    border: '1px solid var(--border)',
   },
   stepIcon: {
-    fontFamily: 'monospace',
+    fontFamily: 'var(--font-dm-mono, monospace)',
     fontSize: 13,
     width: 14,
     flexShrink: 0,
@@ -531,26 +644,31 @@ const styles: Record<string, React.CSSProperties> = {
   stepLabel: {
     fontSize: 13,
     flex: 1,
+    lineHeight: 1.5,
   },
   spinner: {
     fontSize: 12,
-    color: 'var(--accent)',
+    color: 'var(--purple)',
     animation: 'spin 1s linear infinite',
   },
   elapsed: {
     fontSize: 12,
     color: 'var(--text-dim)',
     marginTop: 16,
+    letterSpacing: '0.06em',
+    textTransform: 'uppercase' as const,
   },
 
   // Error
   errorCard: {
-    background: 'var(--bg-card)',
+    background:
+      'linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 94%, transparent), color-mix(in srgb, var(--red-bg) 30%, transparent))',
     border: '1px solid var(--red)',
-    borderRadius: 12,
+    borderRadius: 28,
     padding: 32,
     textAlign: 'center',
     marginTop: 24,
+    boxShadow: 'var(--shadow-soft)',
   },
 
   // Wrapper
@@ -567,12 +685,15 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 4,
+    gap: 12,
+    flexWrap: 'wrap',
   },
   sectionLabel: {
     fontSize: 11,
-    fontWeight: 600,
-    letterSpacing: '0.12em',
-    color: 'var(--accent)',
+    fontWeight: 700,
+    letterSpacing: '0.16em',
+    color: 'var(--purple)',
+    textTransform: 'uppercase' as const,
   },
   analysisDate: {
     fontSize: 12,
@@ -582,15 +703,18 @@ const styles: Record<string, React.CSSProperties> = {
 
   // Generic card
   card: {
-    background: 'var(--bg-card)',
+    background:
+      'linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 94%, transparent), color-mix(in srgb, var(--bg-panel) 94%, transparent))',
     border: '1px solid var(--border)',
-    borderRadius: 12,
+    borderRadius: 28,
     padding: '24px',
+    boxShadow: 'var(--shadow-soft)',
+    backdropFilter: 'blur(14px)',
   },
   cardTitle: {
-    fontSize: 13,
-    fontWeight: 600,
-    letterSpacing: '0.06em',
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: '0.16em',
     color: 'var(--text-muted)',
     textTransform: 'uppercase' as const,
     marginBottom: 16,
@@ -598,8 +722,8 @@ const styles: Record<string, React.CSSProperties> = {
 
   // Executive summary
   execSummary: {
-    fontSize: 16,
-    lineHeight: 1.7,
+    fontSize: 17,
+    lineHeight: 1.8,
     color: 'var(--text)',
     marginBottom: 14,
   },
@@ -614,11 +738,12 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 4,
   },
   tagDot: {
-    width: 6,
-    height: 6,
+    width: 8,
+    height: 8,
     borderRadius: '50%',
     background: 'var(--purple)',
     flexShrink: 0,
+    boxShadow: '0 0 18px rgba(111, 61, 244, 0.35)',
   },
 
   // Financial snapshot
@@ -631,9 +756,10 @@ const styles: Record<string, React.CSSProperties> = {
   finCell: {
     display: 'flex',
     flexDirection: 'column',
-    gap: 4,
-    background: 'var(--bg-elevated)',
-    borderRadius: 8,
+    gap: 6,
+    background: 'var(--bg-panel)',
+    borderRadius: 18,
+    border: '1px solid var(--border)',
     padding: '12px 14px',
   },
   finLabel: {
@@ -643,8 +769,8 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: '0.08em',
   },
   finValue: {
-    fontSize: 14,
-    fontWeight: 600,
+    fontSize: 15,
+    fontWeight: 700,
     fontFamily: 'var(--font-dm-mono, monospace)',
     color: 'var(--text)',
   },
@@ -654,8 +780,9 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 8,
     fontSize: 13,
     color: 'var(--text-muted)',
-    background: 'var(--bg-elevated)',
-    borderRadius: 8,
+    background: 'var(--bg-panel)',
+    borderRadius: 18,
+    border: '1px solid var(--border)',
     padding: '10px 14px',
   },
   noteIcon: {
@@ -672,13 +799,15 @@ const styles: Record<string, React.CSSProperties> = {
 
   // Case cards
   caseCard: {
-    background: 'var(--bg-card)',
+    background:
+      'linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 94%, transparent), color-mix(in srgb, var(--bg-panel) 94%, transparent))',
     border: '1px solid',
-    borderRadius: 12,
+    borderRadius: 28,
     padding: 24,
     display: 'flex',
     flexDirection: 'column',
     gap: 16,
+    boxShadow: 'var(--shadow-soft)',
   },
   caseHeader: {
     display: 'flex',
@@ -689,15 +818,16 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'inline-block',
     fontSize: 11,
     fontWeight: 700,
-    letterSpacing: '0.1em',
-    padding: '3px 10px',
-    borderRadius: 4,
+    letterSpacing: '0.14em',
+    padding: '6px 12px',
+    borderRadius: 999,
     width: 'fit-content',
   },
   caseHeadline: {
     fontSize: 16,
-    fontWeight: 600,
+    fontWeight: 700,
     color: 'var(--text)',
+    letterSpacing: '-0.02em',
   },
   casePoints: {
     listStyle: 'none',
@@ -715,10 +845,10 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'flex-start',
   },
   plainEnglishBox: {
-    background: 'var(--bg-elevated)',
-    borderRadius: 8,
+    background: 'var(--bg-panel)',
+    borderRadius: 18,
+    border: '1px solid var(--border)',
     padding: '12px 14px',
-    borderTop: '1px solid var(--border)',
     marginTop: 4,
   },
   plainLabel: {
@@ -751,7 +881,7 @@ const styles: Record<string, React.CSSProperties> = {
     width: 22,
     height: 22,
     borderRadius: '50%',
-    background: 'var(--bg-elevated)',
+    background: 'var(--bg-panel)',
     border: '1px solid var(--border)',
     display: 'flex',
     alignItems: 'center',
@@ -778,26 +908,28 @@ const styles: Record<string, React.CSSProperties> = {
 
   // Research Summary
   summaryCard: {
-    background: 'var(--bg-card)',
+    background:
+      'linear-gradient(145deg, rgba(111, 61, 244, 0.94), rgba(24, 18, 38, 0.98))',
     border: '1px solid var(--border)',
-    borderRadius: 12,
+    borderRadius: 28,
     padding: 28,
     display: 'flex',
     flexDirection: 'column',
     gap: 20,
+    boxShadow: 'var(--shadow-strong)',
   },
   summaryLabel: {
     fontSize: 11,
     fontWeight: 700,
-    letterSpacing: '0.12em',
-    color: 'var(--text-dim)',
+    letterSpacing: '0.16em',
+    color: 'rgba(255,255,255,0.62)',
     display: 'block',
   },
   summarySubLabel: {
     fontSize: 11,
     fontWeight: 600,
     letterSpacing: '0.08em',
-    color: 'var(--text-dim)',
+    color: 'rgba(255,255,255,0.6)',
     textTransform: 'uppercase' as const,
     display: 'block',
     marginBottom: 10,
@@ -806,18 +938,22 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     gap: 10,
+    padding: '16px 18px',
+    borderRadius: 20,
+    background: 'rgba(255,255,255,0.06)',
+    border: '1px solid rgba(255,255,255,0.08)',
   },
   summaryText: {
     fontSize: 13,
     lineHeight: 1.7,
-    color: 'var(--text-muted)',
+    color: 'rgba(255,255,255,0.82)',
   },
   summaryRisks: {
-    borderTop: '1px solid var(--border)',
+    borderTop: '1px solid rgba(255,255,255,0.12)',
     paddingTop: 18,
   },
   dataGaps: {
-    borderTop: '1px solid var(--border)',
+    borderTop: '1px solid rgba(255,255,255,0.12)',
     paddingTop: 18,
   },
   gapList: {
@@ -839,15 +975,17 @@ const styles: Record<string, React.CSSProperties> = {
 
   // Deep dive
   deepDive: {
-    background: 'var(--bg-card)',
+    background:
+      'linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 94%, transparent), color-mix(in srgb, var(--bg-panel) 94%, transparent))',
     border: '1px solid var(--border)',
-    borderRadius: 12,
+    borderRadius: 28,
     padding: '18px 24px',
+    boxShadow: 'var(--shadow-soft)',
   },
   deepDiveSummary: {
     fontSize: 14,
-    fontWeight: 600,
-    color: 'var(--text-muted)',
+    fontWeight: 700,
+    color: 'var(--text)',
     cursor: 'pointer',
     userSelect: 'none' as const,
     display: 'flex',

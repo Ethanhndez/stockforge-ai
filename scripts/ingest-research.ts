@@ -164,7 +164,18 @@ async function ingestDocument(
     type: doc.type,
     source_url: doc.source_url,
     content: chunkContent,
-    tags: doc.tags,
+    tags: [...doc.tags, 'external-reference'],
+    metadata: {
+      provenance_class: 'external_reference',
+      source_kind:
+        doc.type === 'research_paper'
+          ? 'research_paper'
+          : doc.type === 'code_repo'
+            ? 'code_repository'
+            : 'article',
+      visibility: 'reference',
+      author: 'Affaan Mustafa / external references',
+    },
     chunk_index: chunkIndex,
     embedding,
   })
