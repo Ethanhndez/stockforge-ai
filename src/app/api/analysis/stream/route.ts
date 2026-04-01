@@ -16,6 +16,23 @@
 import { NextRequest } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { analyzeStock } from '@/lib/ai/agentOrchestrator'
+import type { AnalysisResponse, AnalysisToolError, ResearchPosture } from '@/lib/ai/analysis-contract'
+import {
+  buildCanonicalAnalysisFromPosture,
+  buildCanonicalAnalysisFromResponse,
+  validateCanonicalAnalysis,
+} from '@/lib/ai/analysis-validator'
+import {
+  createExecutionMetadata,
+  detectFallbackReason,
+  logExecutionMetadata,
+  mergeExecutionMetadata,
+  recordGaps,
+  recordToolFailure,
+  recordToolUsed,
+  recordValidation,
+  setFallbackReason,
+} from '@/lib/ai/execution-observability'
 import { buildStockContext } from '@/lib/ai/contextBuilder'
 import { STOCK_TOOLS } from '@/lib/claude-tools'
 import { executeTool } from '@/lib/tool-executor'
@@ -78,6 +95,33 @@ function parseJsonObject<T>(raw: string): T {
   }
 
   return JSON.parse(cleaned.slice(jsonStart, jsonEnd + 1)) as T
+}
+
+function assertValidCanonicalPosture(args: {
+  ticker: string
+  companyName: string
+  posture: ResearchPosture
+  executionPath: 'parallel' | 'fallback'
+  executionMetadata: import('@/lib/ai/analysis-contract').AnalysisExecutionMetadata
+  dataSourcesUsed?: string[]
+  toolErrors?: AnalysisToolError[]
+}): void {
+  const validation = validateCanonicalAnalysis(
+    buildCanonicalAnalysisFromPosture({
+      ticker: args.ticker,
+      companyName: args.companyName,
+      posture: args.posture,
+      executionPath: args.executionPath,
+      dataSourcesUsed: args.dataSourcesUsed,
+      toolErrors: args.toolErrors,
+    })
+  )
+  recordValidation(args.executionMetadata, validation.ok)
+  recordGaps(args.executionMetadata, args.posture.data_gaps)
+
+  if (!validation.ok) {
+    throw new Error(`Canonical analysis validation failed: ${validation.errors.join('; ')}`)
+  }
 }
 
 function buildFixtureAnalysis(ticker: string, fixtureAnalysis: Record<string, unknown>) {
@@ -249,25 +293,30 @@ export async function POST(req: NextRequest) {
           new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
         )
       }
+      const parallelExecution = createExecutionMetadata('parallel')
+      let inheritedFallbackMetadata = createExecutionMetadata('fallback')
 
       try {
         send('status', { message: 'Building stock context', stage: 'context' })
         const context = await buildStockContext(ticker)
+        Object.assign(parallelExecution, mergeExecutionMetadata(parallelExecution, context.executionMetadata))
         send('status', { message: 'Parallel agents running', stage: 'parallel' })
+        recordToolUsed(parallelExecution, 'fundamentalAgent')
         send('tool_call', { name: 'fundamentalAgent', stage: 'calling' })
+        recordToolUsed(parallelExecution, 'technicalAgent')
         send('tool_call', { name: 'technicalAgent', stage: 'calling' })
+        recordToolUsed(parallelExecution, 'sentimentAgent')
         send('tool_call', { name: 'sentimentAgent', stage: 'calling' })
 
         const result = await analyzeStock(ticker, context)
         send('tool_result', { name: 'fundamentalAgent', success: true })
         send('tool_result', { name: 'technicalAgent', success: true })
         send('tool_result', { name: 'sentimentAgent', success: true })
+        recordToolUsed(parallelExecution, 'synthesisAgent')
         send('tool_call', { name: 'synthesisAgent', stage: 'executing' })
 
-        const fullAnalysis = parseJsonObject<{
-          researchPosture?: Record<string, unknown>
-        }>(result.synthesis)
-        const postureText = JSON.stringify(fullAnalysis.researchPosture ?? {
+        const fullAnalysis = parseJsonObject<AnalysisResponse>(result.synthesis)
+        const posture = fullAnalysis.researchPosture ?? {
           ticker,
           bull_case: '',
           bear_case: '',
@@ -275,12 +324,47 @@ export async function POST(req: NextRequest) {
           data_gaps: [],
           rag_sources: [],
           fetchedAt: new Date().toISOString(),
+        }
+
+        const fullAnalysisValidation = validateCanonicalAnalysis(
+          buildCanonicalAnalysisFromResponse({
+            analysis: fullAnalysis,
+            executionPath: 'parallel',
+          })
+        )
+        recordValidation(parallelExecution, fullAnalysisValidation.ok)
+        recordGaps(parallelExecution, posture.data_gaps)
+        if (!fullAnalysisValidation.ok) {
+          setFallbackReason(parallelExecution, 'validation_failed')
+          logExecutionMetadata('/api/analysis/stream parallel->fallback', parallelExecution)
+          throw new Error(
+            `Canonical analysis validation failed: ${fullAnalysisValidation.errors.join('; ')}`
+          )
+        }
+        assertValidCanonicalPosture({
+          ticker,
+          companyName: fullAnalysis.companyName,
+          posture,
+          executionPath: 'parallel',
+          executionMetadata: parallelExecution,
+          dataSourcesUsed: fullAnalysis.data_sources,
         })
+        logExecutionMetadata('/api/analysis/stream parallel', parallelExecution)
+
+        const postureText = JSON.stringify(posture)
 
         send('token', { text: postureText })
         send('done', { text: postureText })
         return
       } catch (parallelError) {
+        setFallbackReason(parallelExecution, detectFallbackReason(parallelError))
+        inheritedFallbackMetadata = mergeExecutionMetadata(inheritedFallbackMetadata, {
+          fallbackReason: parallelExecution.fallbackReason,
+          hadGaps: parallelExecution.hadGaps,
+          toolsUsed: parallelExecution.toolsUsed,
+          toolsFailed: parallelExecution.toolsFailed,
+        })
+        logExecutionMetadata('/api/analysis/stream parallel-failed', parallelExecution)
         send('status', {
           message: `Parallel agents failed, using legacy stream fallback: ${String(parallelError)}`,
           stage: 'fallback',
@@ -298,8 +382,15 @@ export async function POST(req: NextRequest) {
         const messages: Anthropic.MessageParam[] = [
           { role: 'user', content: `Analyze ${ticker}. ${query || 'Provide a comprehensive research briefing.'}` },
         ]
+        const fallbackExecution = mergeExecutionMetadata(createExecutionMetadata('fallback'), {
+          fallbackReason: inheritedFallbackMetadata.fallbackReason,
+          hadGaps: inheritedFallbackMetadata.hadGaps,
+          toolsUsed: inheritedFallbackMetadata.toolsUsed,
+          toolsFailed: inheritedFallbackMetadata.toolsFailed,
+        })
 
         let iterationCount = 0
+        const toolErrors: AnalysisToolError[] = []
 
         while (iterationCount < MAX_ITERATIONS) {
           iterationCount++
@@ -365,6 +456,16 @@ export async function POST(req: NextRequest) {
           messages.push({ role: 'assistant', content: contentBlocks })
 
           if (stopReason === 'end_turn') {
+            const posture = parseJsonObject<ResearchPosture>(fullText)
+            assertValidCanonicalPosture({
+              ticker,
+              companyName: ticker,
+              posture,
+              executionPath: 'fallback',
+              executionMetadata: fallbackExecution,
+              toolErrors,
+            })
+            logExecutionMetadata('/api/analysis/stream fallback', fallbackExecution)
             send('done', { text: fullText })
             break
           }
@@ -376,12 +477,32 @@ export async function POST(req: NextRequest) {
 
             const toolResults: Anthropic.ToolResultBlockParam[] = await Promise.all(
               toolUseBlocks.map(async (block) => {
+                recordToolUsed(fallbackExecution, block.name)
                 send('tool_call', { name: block.name, stage: 'executing' })
                 try {
                   const result = await executeTool(
                     block.name,
                     block.input as Record<string, string | number | undefined>
                   )
+                  if (
+                    typeof result === 'object' &&
+                    result !== null &&
+                    'error' in result &&
+                    typeof result.error === 'string' &&
+                    result.error.trim().length > 0
+                  ) {
+                    toolErrors.push({
+                      tool: block.name,
+                      source: 'legacy-stream-tool-loop',
+                      error: result.error,
+                    })
+                    recordToolFailure(
+                      fallbackExecution,
+                      block.name,
+                      'legacy-stream-tool-loop',
+                      result.error
+                    )
+                  }
                   send('tool_result', { name: block.name, success: true })
                   return {
                     type: 'tool_result' as const,
@@ -404,6 +525,7 @@ export async function POST(req: NextRequest) {
           }
         }
       } catch (error) {
+        logExecutionMetadata('/api/analysis/stream failed', inheritedFallbackMetadata)
         send('error', { message: String(error) })
       } finally {
         controller.close()

@@ -6,6 +6,7 @@ import {
   SYNTHESIS_AGENT_SYSTEM_PROMPT,
   TECHNICAL_AGENT_SYSTEM_PROMPT,
 } from '@/lib/ai/agentPrompts'
+import type { AnalysisExecutionMetadata } from '@/lib/ai/analysis-contract'
 import {
   fundamentalAnalysisSchema,
   sentimentAnalysisSchema,
@@ -102,6 +103,7 @@ export interface StockContext {
   priceHistory: StockPriceHistoryContext
   news: StockNewsContext
   dataSources: string[]
+  executionMetadata?: AnalysisExecutionMetadata
 }
 
 export interface StockAnalysis {

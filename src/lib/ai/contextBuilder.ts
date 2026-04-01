@@ -1,3 +1,9 @@
+import {
+  createExecutionMetadata,
+  recordGaps,
+  recordToolFailure,
+  recordToolUsed,
+} from '@/lib/ai/execution-observability'
 import { getResearchContext } from '@/lib/rag'
 import {
   getCompanyProfile,
@@ -7,6 +13,7 @@ import {
   getNews,
   getQuote,
   getRecentFilings,
+  unwrapToolExecutionResult,
 } from '@/lib/tool-executor'
 import type { StockContext } from '@/lib/ai/agentOrchestrator'
 import type {
@@ -16,6 +23,7 @@ import type {
   FundamentalsResult,
   NewsResult,
   QuoteResult,
+  ToolExecutionResult,
 } from '@/lib/tools'
 
 interface PriceBar {
@@ -165,13 +173,18 @@ function calcMacd(values: number[]): {
   }
 }
 
-async function getFilingExcerpts(profile: CompanyProfileResult): Promise<FilingExcerpt[]> {
+async function getFilingExcerpts(
+  profile: CompanyProfileResult,
+  metadata?: StockContext['executionMetadata']
+): Promise<FilingExcerpt[]> {
   if (!profile.cik) return []
 
-  const filings = assertNoError(
-    (await getRecentFilings(profile.cik)) as FilingsResult,
-    'Recent filings lookup failed'
-  )
+  const filings = unwrapResultOrThrow({
+    result: await getRecentFilings(profile.cik),
+    label: 'Recent filings lookup failed',
+    toolName: 'get_recent_filings',
+    metadata,
+  }) as FilingsResult
 
   const targets = (filings.recentFilings ?? [])
     .filter((filing) => filing.form === '10-Q' || filing.form === '8-K')
@@ -179,7 +192,12 @@ async function getFilingExcerpts(profile: CompanyProfileResult): Promise<FilingE
 
   const excerpts = await Promise.all(
     targets.map(async (filing) => {
-      const content = await getFilingContent(profile.cik as string, filing.accessionNumber)
+      const content = unwrapResultOrThrow({
+        result: await getFilingContent(profile.cik as string, filing.accessionNumber),
+        label: 'Filing content lookup failed',
+        toolName: 'getFilingContent',
+        metadata,
+      }) as { content: string; source: string }
 
       return {
         form: filing.form,
@@ -195,16 +213,42 @@ async function getFilingExcerpts(profile: CompanyProfileResult): Promise<FilingE
   return excerpts
 }
 
+function unwrapResultOrThrow<T extends object>(args: {
+  result: ToolExecutionResult<T>
+  label: string
+  toolName: string
+  metadata: StockContext['executionMetadata']
+}): T & { fetchedAt?: string; source?: string; error?: string; gaps?: string[] } {
+  const { result, label, toolName, metadata } = args
+
+  if (metadata) {
+    recordToolUsed(metadata, toolName)
+    recordGaps(metadata, result.gaps)
+  }
+
+  const unwrapped = unwrapToolExecutionResult(result)
+
+  if (unwrapped.error) {
+    if (metadata) {
+      recordToolFailure(metadata, toolName, result.source, unwrapped.error)
+    }
+    throw new Error(`${label}: ${unwrapped.error}`)
+  }
+
+  return assertNoError(unwrapped, label)
+}
+
 export async function buildStockContext(ticker: string): Promise<StockContext> {
   const analysisDate = formatDate(new Date())
+  const executionMetadata = createExecutionMetadata('parallel')
 
-  const [profileRaw, fundamentalsRaw, financialsRaw, quoteRaw, newsRaw, priceBars, researchContext] =
+  const [profileResult, fundamentalsResult, financialsResult, quoteResult, newsResult, priceBars, researchContext] =
     await Promise.all([
-      getCompanyProfile(ticker) as Promise<CompanyProfileResult>,
-      getFundamentals(ticker) as Promise<FundamentalsResult>,
-      getFinancials(ticker) as Promise<FinancialsResult>,
-      getQuote(ticker) as Promise<QuoteResult>,
-      getNews(ticker, 6) as Promise<NewsResult>,
+      getCompanyProfile(ticker),
+      getFundamentals(ticker),
+      getFinancials(ticker),
+      getQuote(ticker),
+      getNews(ticker, 6),
       getPriceHistory(ticker),
       getResearchContext(`stock analysis ${ticker} investment research fundamentals risk`, {
         matchThreshold: 0.65,
@@ -213,12 +257,37 @@ export async function buildStockContext(ticker: string): Promise<StockContext> {
       }),
     ])
 
-  const profile = assertNoError(profileRaw, 'Company profile lookup failed')
-  const fundamentals = assertNoError(fundamentalsRaw, 'Fundamentals lookup failed')
-  const financials = assertNoError(financialsRaw, 'Financials lookup failed')
-  const quote = assertNoError(quoteRaw, 'Quote lookup failed')
-  const news = assertNoError(newsRaw, 'News lookup failed')
-  const filingExcerpts = await getFilingExcerpts(profile)
+  const profile = unwrapResultOrThrow({
+    result: profileResult,
+    label: 'Company profile lookup failed',
+    toolName: 'getCompanyProfile',
+    metadata: executionMetadata,
+  }) as CompanyProfileResult
+  const fundamentals = unwrapResultOrThrow({
+    result: fundamentalsResult,
+    label: 'Fundamentals lookup failed',
+    toolName: 'getFundamentals',
+    metadata: executionMetadata,
+  }) as FundamentalsResult
+  const financials = unwrapResultOrThrow({
+    result: financialsResult,
+    label: 'Financials lookup failed',
+    toolName: 'getFinancials',
+    metadata: executionMetadata,
+  }) as FinancialsResult
+  const quote = unwrapResultOrThrow({
+    result: quoteResult,
+    label: 'Quote lookup failed',
+    toolName: 'getQuote',
+    metadata: executionMetadata,
+  }) as QuoteResult
+  const news = unwrapResultOrThrow({
+    result: newsResult,
+    label: 'News lookup failed',
+    toolName: 'getNews',
+    metadata: executionMetadata,
+  }) as NewsResult
+  const filingExcerpts = await getFilingExcerpts(profile, executionMetadata)
 
   const closes = priceBars.map((bar) => bar.close)
   const volumes = priceBars.map((bar) => bar.volume)
@@ -273,6 +342,7 @@ export async function buildStockContext(ticker: string): Promise<StockContext> {
       headlines: news.articles,
       secFilings: filingExcerpts,
     },
+    executionMetadata,
     dataSources: [
       `Polygon.io /v3/reference/tickers/${ticker}`,
       `Polygon.io /vX/reference/financials?ticker=${ticker}&timeframe=annual&limit=1`,

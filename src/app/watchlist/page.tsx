@@ -50,22 +50,25 @@ export default function WatchlistPage() {
               }}
             >
               <div
-                style={{
-                  fontSize: 11,
-                  letterSpacing: '0.16em',
-                  textTransform: 'uppercase',
-                  color: 'var(--text-dim)',
-                }}
-              >
+              style={{
+                fontSize: 11,
+                letterSpacing: 'var(--type-eyebrow-tracking)',
+                textTransform: 'uppercase',
+                color: 'var(--text-dim)',
+                fontWeight: 650,
+              }}
+            >
                 Saved Coverage
               </div>
               <h1
-                style={{
-                  margin: '10px 0 6px',
-                  fontSize: 'clamp(34px, 6vw, 54px)',
-                  letterSpacing: '-0.06em',
-                }}
-              >
+              style={{
+                margin: '10px 0 6px',
+                fontSize: 'clamp(34px, 6vw, 54px)',
+                letterSpacing: 'var(--type-display-tracking)',
+                lineHeight: 'var(--type-display-line-height)',
+                fontWeight: 650,
+              }}
+            >
                 Watchlist
               </h1>
               <p
@@ -73,7 +76,7 @@ export default function WatchlistPage() {
                   margin: 0,
                   color: 'var(--text-muted)',
                   fontSize: 15,
-                  lineHeight: 1.7,
+                  lineHeight: 'var(--type-body-line-height)',
                   maxWidth: 520,
                 }}
               >

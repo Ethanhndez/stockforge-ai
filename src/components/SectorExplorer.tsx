@@ -361,7 +361,7 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     whiteSpace: 'nowrap',
     transition: 'all 0.15s ease',
-    fontFamily: 'var(--font-geist-sans, sans-serif)',
+    fontFamily: 'var(--font-sans, sans-serif)',
     letterSpacing: '0.08em',
     textTransform: 'uppercase' as const,
     boxShadow: 'var(--shadow-soft)',

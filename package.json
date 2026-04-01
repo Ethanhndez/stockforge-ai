@@ -11,6 +11,7 @@
     "prepare": "husky",
     "ruflo:start": "npx ruflo@latest mcp start --config .ruflo/config.json",
     "adversarial-test": "node --experimental-strip-types --import ./scripts/registerTsPaths.mjs ./scripts/adversarialTest.mjs",
+    "proof:fixtures": "node --experimental-strip-types --import ./scripts/registerTsPaths.mjs ./scripts/proofFixtureReport.mjs",
     "test:fixtures": "NEXT_PUBLIC_USE_FIXTURES=true next dev",
     "test:types": "tsc --noEmit",
     "test:lint": "eslint src/",

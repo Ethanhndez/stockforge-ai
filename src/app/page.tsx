@@ -98,8 +98,8 @@ export default function HomePage() {
                 boxShadow: 'var(--shadow-soft)',
                 color: 'var(--text-muted)',
                 fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: '0.16em',
+                fontWeight: 650,
+                letterSpacing: 'var(--type-eyebrow-tracking)',
                 textTransform: 'uppercase',
               }}
             >
@@ -121,8 +121,9 @@ export default function HomePage() {
                 margin: '22px 0 18px',
                 maxWidth: 760,
                 fontSize: 'clamp(48px, 8vw, 88px)',
-                lineHeight: 0.92,
-                letterSpacing: '-0.07em',
+                lineHeight: 'var(--type-display-line-height)',
+                letterSpacing: 'var(--type-display-tracking)',
+                fontWeight: 650,
               }}
             >
               Minimal surface.
@@ -136,7 +137,7 @@ export default function HomePage() {
                 maxWidth: 620,
                 color: 'var(--text-muted)',
                 fontSize: 18,
-                lineHeight: 1.75,
+                lineHeight: 'var(--type-body-line-height)',
               }}
             >
               A slick stock research interface built for fast thesis formation:
@@ -354,8 +355,9 @@ export default function HomePage() {
                 style={{
                   fontSize: 11,
                   textTransform: 'uppercase',
-                  letterSpacing: '0.16em',
+                  letterSpacing: 'var(--type-eyebrow-tracking)',
                   color: 'rgba(255,255,255,0.65)',
+                  fontWeight: 650,
                 }}
               >
                 Research Mode
@@ -364,9 +366,9 @@ export default function HomePage() {
                 style={{
                   marginTop: 18,
                   fontSize: 34,
-                  lineHeight: 1,
-                  letterSpacing: '-0.05em',
-                  fontWeight: 700,
+                  lineHeight: 'var(--type-title-line-height)',
+                  letterSpacing: 'var(--type-title-tracking)',
+                  fontWeight: 650,
                 }}
               >
                 Think like an analyst.
@@ -377,7 +379,7 @@ export default function HomePage() {
                 style={{
                   marginTop: 16,
                   color: 'rgba(255,255,255,0.74)',
-                  lineHeight: 1.7,
+                  lineHeight: 'var(--type-body-line-height)',
                   fontSize: 14,
                 }}
               >

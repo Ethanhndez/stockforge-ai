@@ -5,6 +5,8 @@
 // Tool outputs = what the server sends back after executing.
 // ============================================================
 
+import type { ResearchPosture } from '@/lib/ai/analysis-contract'
+
 // ── Tool Input Types (Claude → Server) ──────────────────────
 
 export interface GetQuoteInput {
@@ -36,6 +38,25 @@ export interface CompareStocksInput {
   tickerA: string
   tickerB: string
 }
+
+export interface ToolExecutionSuccess<T> {
+  status: 'success'
+  source: string
+  data: T
+  gaps?: string[]
+  fetchedAt?: string
+}
+
+export interface ToolExecutionError {
+  status: 'error'
+  source: string
+  data: null
+  error: string
+  gaps?: string[]
+  fetchedAt?: string
+}
+
+export type ToolExecutionResult<T> = ToolExecutionSuccess<T> | ToolExecutionError
 
 // ── Tool Output Types (Server → Claude) ─────────────────────
 
@@ -149,12 +170,4 @@ export type ToolResult =
 
 // ── Structured Research Posture Output ──────────────────────
 
-export interface ResearchPosture {
-  ticker: string
-  bull_case: string
-  bear_case: string
-  key_risks: string[]
-  data_gaps: string[]
-  rag_sources?: string[]
-  fetchedAt: string
-}
+export type { ResearchPosture }

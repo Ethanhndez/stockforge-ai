@@ -10,6 +10,8 @@ import type {
   UserSettingsRecord,
 } from '@/lib/portfolio/types'
 
+type HoldingTrustQuality = 'complete' | 'degraded' | 'limited' | 'unknown'
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -20,6 +22,68 @@ function formatCurrency(value: number) {
 
 function formatPercent(value: number) {
   return `${(value * 100).toFixed(1)}%`
+}
+
+function formatTimestamp(value: string | null | undefined): string {
+  if (!value) return 'Unknown'
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Unknown'
+
+  return date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+function trustTone(quality: HoldingTrustQuality) {
+  switch (quality) {
+    case 'complete':
+      return {
+        label: 'Complete',
+        color: 'var(--green)',
+        background: 'var(--green-bg)',
+        border: 'color-mix(in srgb, var(--green) 30%, var(--border))',
+      }
+    case 'degraded':
+      return {
+        label: 'Degraded',
+        color: 'var(--accent)',
+        background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-card))',
+        border: 'color-mix(in srgb, var(--accent) 28%, var(--border))',
+      }
+    case 'limited':
+      return {
+        label: 'Limited',
+        color: 'var(--red)',
+        background: 'var(--red-bg)',
+        border: 'color-mix(in srgb, var(--red) 30%, var(--border))',
+      }
+    case 'unknown':
+      return {
+        label: 'Unknown',
+        color: 'var(--text-dim)',
+        background: 'var(--bg-card)',
+        border: 'var(--border)',
+      }
+  }
+}
+
+function getHoldingTrustState(): {
+  quality: HoldingTrustQuality
+  label: string
+  detail: string
+  lastAnalyzedAt: string | null
+} {
+  return {
+    quality: 'unknown',
+    label: 'Not analyzed',
+    detail: 'No per-holding analysis trust metadata is available yet in the portfolio layer.',
+    lastAnalyzedAt: null,
+  }
 }
 
 function humanizeGoal(value: NonNullable<UserSettingsRecord['primary_goal']>) {
@@ -165,6 +229,8 @@ interface Props {
   holdings: PortfolioDashboardHolding[]
   sectorAllocations: SectorAllocation[]
   userSettings: UserSettingsRecord
+  dashboardGeneratedAt: string
+  workspaceUpdatedAt: string | null
 }
 
 export default function PortfolioDashboardClient({
@@ -179,6 +245,8 @@ export default function PortfolioDashboardClient({
   holdings,
   sectorAllocations,
   userSettings,
+  dashboardGeneratedAt,
+  workspaceUpdatedAt,
 }: Props) {
   const router = useRouter()
   const supabase = createClient()
@@ -229,6 +297,16 @@ export default function PortfolioDashboardClient({
   const activeAutomationGuidance = automationGuidance(automationPreference)
   const dominantActionLabel = goalActionLabel(goal)
   const dominantActionGuidance = goalActionGuidance(goal)
+  const holdingTrustStates = holdings.map((holding) => ({
+    holdingId: holding.id,
+    ...getHoldingTrustState(holding),
+  }))
+  const analyzedHoldings = holdingTrustStates.filter((state) => state.quality !== 'unknown').length
+  const completeCount = holdingTrustStates.filter((state) => state.quality === 'complete').length
+  const degradedCount = holdingTrustStates.filter((state) => state.quality === 'degraded').length
+  const limitedCount = holdingTrustStates.filter((state) => state.quality === 'limited').length
+  const unknownCount = holdingTrustStates.filter((state) => state.quality === 'unknown').length
+  const holdingsWithMarketContext = holdings.filter((holding) => holding.currentPrice !== null).length
 
   async function refreshAfterMutation(options?: { profileSaved?: boolean }) {
     setProfileSaved(options?.profileSaved ?? false)
@@ -778,6 +856,225 @@ export default function PortfolioDashboardClient({
                 gap: 20,
               }}
             >
+            <div
+              style={{
+                padding: 22,
+                borderRadius: 28,
+                border: '1px solid var(--border)',
+                background:
+                  'linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 94%, transparent), color-mix(in srgb, var(--bg-panel) 94%, transparent))',
+                boxShadow: 'var(--shadow-soft)',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: 16,
+                  alignItems: 'flex-start',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      letterSpacing: '0.16em',
+                      textTransform: 'uppercase',
+                      color: 'var(--purple-strong)',
+                      fontWeight: 700,
+                    }}
+                  >
+                    Portfolio Trust Summary
+                  </div>
+                  <p
+                    style={{
+                      margin: '10px 0 0',
+                      color: 'var(--text-muted)',
+                      fontSize: 14,
+                      lineHeight: 1.8,
+                      maxWidth: 720,
+                    }}
+                  >
+                    This view reflects tracked holdings, position sizing, and currently available market context. Per-holding analysis quality is shown only when the portfolio layer has real trust metadata.
+                  </p>
+                </div>
+                <div
+                  style={{
+                    display: 'grid',
+                    gap: 8,
+                    justifyItems: 'start',
+                  }}
+                >
+                  <span
+                    style={{
+                      padding: '8px 10px',
+                      borderRadius: 999,
+                      border: '1px solid var(--border)',
+                      background: 'var(--bg-panel)',
+                      color: 'var(--text-muted)',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: '0.12em',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    Last refresh {formatTimestamp(dashboardGeneratedAt)}
+                  </span>
+                  <span
+                    style={{
+                      padding: '8px 10px',
+                      borderRadius: 999,
+                      border: '1px solid var(--border)',
+                      background: 'var(--bg-panel)',
+                      color: 'var(--text-muted)',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: '0.12em',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    Workspace update {formatTimestamp(workspaceUpdatedAt)}
+                  </span>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+                  gap: 12,
+                  marginTop: 18,
+                }}
+              >
+                {[
+                  ['Coverage', `${analyzedHoldings} of ${holdings.length} holdings analyzed`],
+                  ['Quality mix', `${completeCount} complete · ${degradedCount} degraded · ${limitedCount} limited`],
+                  ['Missing coverage', `${unknownCount} holding${unknownCount === 1 ? '' : 's'} without trust state`],
+                  ['Market context', `${holdingsWithMarketContext} of ${holdings.length} holdings priced`],
+                ].map(([label, value]) => (
+                  <div
+                    key={label}
+                    style={{
+                      padding: '16px 16px',
+                      borderRadius: 20,
+                      border: '1px solid var(--border)',
+                      background: 'var(--bg-panel)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 11,
+                        letterSpacing: '0.14em',
+                        textTransform: 'uppercase',
+                        color: 'var(--text-dim)',
+                        fontWeight: 700,
+                      }}
+                    >
+                      {label}
+                    </div>
+                    <div
+                      style={{
+                        marginTop: 8,
+                        color: 'var(--text)',
+                        fontSize: 15,
+                        fontWeight: 700,
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {value}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                  gap: 14,
+                  marginTop: 18,
+                }}
+              >
+                <div
+                  style={{
+                    padding: '16px 18px',
+                    borderRadius: 20,
+                    border: '1px solid var(--border)',
+                    background: 'var(--bg-panel)',
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 11,
+                      letterSpacing: '0.14em',
+                      textTransform: 'uppercase',
+                      color: 'var(--text-dim)',
+                      fontWeight: 700,
+                    }}
+                  >
+                    What This View Knows
+                  </div>
+                  <p
+                    style={{
+                      margin: '8px 0 0',
+                      color: 'var(--text-muted)',
+                      fontSize: 14,
+                      lineHeight: 1.7,
+                    }}
+                  >
+                    {holdings.length === 0
+                      ? 'No active holdings are tracked yet, so trust coverage is limited to account setup state.'
+                      : `It knows ${holdings.length} tracked holding${holdings.length === 1 ? '' : 's'}, current prices for ${holdingsWithMarketContext}, and portfolio weights derived from saved positions plus cash.`}
+                  </p>
+                </div>
+                <div
+                  style={{
+                    padding: '16px 18px',
+                    borderRadius: 20,
+                    border: '1px solid var(--border)',
+                    background: 'var(--bg-panel)',
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 11,
+                      letterSpacing: '0.14em',
+                      textTransform: 'uppercase',
+                      color: 'var(--text-dim)',
+                      fontWeight: 700,
+                    }}
+                  >
+                    What May Be Missing
+                  </div>
+                  <p
+                    style={{
+                      margin: '8px 0 0',
+                      color: 'var(--text-muted)',
+                      fontSize: 14,
+                      lineHeight: 1.7,
+                    }}
+                  >
+                    {unknownCount > 0
+                      ? `Some holdings do not yet have analysis coverage. Trust metadata is unavailable for ${unknownCount} position${unknownCount === 1 ? '' : 's'}.`
+                      : 'No missing trust state is currently exposed in this portfolio view.'}
+                  </p>
+                  {workspaceUpdatedAt === null ? (
+                    <p
+                      style={{
+                        margin: '8px 0 0',
+                        color: 'var(--text-dim)',
+                        fontSize: 13,
+                        lineHeight: 1.7,
+                      }}
+                    >
+                      Last workspace refresh unavailable.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
             {!onboardingComplete ? (
               <div
                 style={{
@@ -1589,6 +1886,7 @@ export default function PortfolioDashboardClient({
                     <HoldingRow
                       key={holding.id}
                       holding={holding}
+                      trustState={holdingTrustStates.find((state) => state.holdingId === holding.id) ?? getHoldingTrustState(holding)}
                       onSave={handleUpdateHolding}
                       onArchive={handleArchiveHolding}
                       disabled={isBusy}
@@ -1843,11 +2141,13 @@ function QuestionCard<T extends string>({
 
 function HoldingRow({
   holding,
+  trustState,
   onSave,
   onArchive,
   disabled,
 }: {
   holding: PortfolioDashboardHolding
+  trustState: ReturnType<typeof getHoldingTrustState>
   onSave: (holdingId: string, ticker: string, shares: string, costBasis: string) => Promise<void>
   onArchive: (holdingId: string) => Promise<void>
   disabled: boolean
@@ -1856,6 +2156,7 @@ function HoldingRow({
   const [costBasisDraft, setCostBasisDraft] = useState(
     holding.costBasis === null ? '' : holding.costBasis.toString()
   )
+  const tone = trustTone(trustState.quality)
 
   return (
     <div
@@ -1903,6 +2204,21 @@ function HoldingRow({
           >
             {holding.sector ?? 'Unclassified'}
           </span>
+          <span
+            style={{
+              padding: '6px 10px',
+              borderRadius: 999,
+              border: `1px solid ${tone.border}`,
+              background: tone.background,
+              color: tone.color,
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+            }}
+          >
+            {tone.label}
+          </span>
         </div>
 
         <div
@@ -1917,6 +2233,32 @@ function HoldingRow({
           <span>Price {holding.currentPrice === null ? 'Data unavailable' : formatCurrency(holding.currentPrice)}</span>
           <span>Value {formatCurrency(holding.currentValue)}</span>
           <span>Weight {formatPercent(holding.weight)}</span>
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            gap: 16,
+            flexWrap: 'wrap',
+            color: 'var(--text-dim)',
+            fontSize: 12,
+            lineHeight: 1.6,
+          }}
+        >
+          <span>{trustState.label}</span>
+          <span>Holding updated {formatTimestamp(holding.updatedAt)}</span>
+          <span>
+            Analysis updated {formatTimestamp(trustState.lastAnalyzedAt)}
+          </span>
+        </div>
+        <div
+          style={{
+            color: 'var(--text-dim)',
+            fontSize: 12,
+            lineHeight: 1.6,
+            maxWidth: 560,
+          }}
+        >
+          {trustState.detail}
         </div>
       </div>
 

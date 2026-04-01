@@ -29,6 +29,8 @@ export default async function DashboardPage() {
         holdings={dashboard.holdings}
         sectorAllocations={dashboard.sectorAllocations}
         userSettings={dashboard.userSettings}
+        dashboardGeneratedAt={dashboard.dashboardGeneratedAt}
+        workspaceUpdatedAt={dashboard.workspaceUpdatedAt}
       />
     </>
   )

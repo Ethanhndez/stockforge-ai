@@ -30,10 +30,10 @@ export default function LoginPage() {
             <div
               style={{
                 fontSize: 12,
-                letterSpacing: '0.18em',
+                letterSpacing: 'var(--type-eyebrow-tracking)',
                 textTransform: 'uppercase',
                 color: 'var(--purple-strong)',
-                fontWeight: 700,
+                fontWeight: 650,
               }}
             >
               Phase 1 • Private Portfolio OS
@@ -42,8 +42,9 @@ export default function LoginPage() {
               style={{
                 margin: '14px 0 14px',
                 fontSize: 'clamp(44px, 8vw, 82px)',
-                lineHeight: 0.95,
-                letterSpacing: '-0.08em',
+                lineHeight: 'var(--type-display-line-height)',
+                letterSpacing: 'var(--type-display-tracking)',
+                fontWeight: 650,
                 maxWidth: 760,
               }}
             >
@@ -55,7 +56,7 @@ export default function LoginPage() {
                 maxWidth: 700,
                 color: 'var(--text-muted)',
                 fontSize: 17,
-                lineHeight: 1.8,
+                lineHeight: 'var(--type-body-line-height)',
               }}
             >
               Sign in to your private portfolio operating system. This is where holdings,

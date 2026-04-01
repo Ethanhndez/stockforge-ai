@@ -42,6 +42,7 @@ export interface PortfolioDashboardHolding {
   currentValue: number
   weight: number
   sector: string | null
+  updatedAt: string
 }
 
 export interface SectorAllocation {
@@ -58,6 +59,8 @@ export interface PortfolioDashboardData {
   totalValue: number
   sectorAllocations: SectorAllocation[]
   userSettings: UserSettingsRecord
+  dashboardGeneratedAt: string
+  workspaceUpdatedAt: string | null
 }
 
 export interface UserSettingsRecord {

@@ -80,6 +80,12 @@ function formatMetric(n: number | null, suffix = '') {
   }).format(n)}${suffix}`
 }
 
+function formatChangePct(raw: string | number) {
+  const n = typeof raw === 'string' ? parseFloat(raw.replace('%', '')) : raw
+  if (Number.isNaN(n)) return '—'
+  return `${Math.abs(n).toFixed(2)}%`
+}
+
 function winnerStyle(
   left: number | null,
   right: number | null,
@@ -180,7 +186,9 @@ const metricCellStyle: CSSProperties = {
   gap: 8,
   padding: '14px 16px',
   borderRadius: 20,
-  border: '1px solid var(--border)',
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: 'var(--border)',
   background: 'var(--bg-panel)',
   minWidth: 0,
 }
@@ -195,9 +203,10 @@ const metricTickerStyle: CSSProperties = {
 
 const metricValueStyle: CSSProperties = {
   fontSize: 18,
-  letterSpacing: '-0.04em',
+  letterSpacing: '-0.025em',
   color: 'var(--text)',
   fontFamily: 'var(--font-dm-mono, monospace)',
+  fontWeight: 650,
 }
 
 function ComparePageContent() {
@@ -320,8 +329,8 @@ function ComparePageContent() {
                 style={{
                   fontSize: 11,
                   color: 'var(--purple)',
-                  fontWeight: 700,
-                  letterSpacing: '0.16em',
+                  fontWeight: 650,
+                  letterSpacing: 'var(--type-eyebrow-tracking)',
                   textTransform: 'uppercase',
                 }}
               >
@@ -331,8 +340,10 @@ function ComparePageContent() {
                 style={{
                   margin: '10px 0 8px',
                   fontSize: 'clamp(34px, 6vw, 56px)',
-                  letterSpacing: '-0.07em',
-                  lineHeight: 0.92,
+                  letterSpacing: 'var(--type-display-tracking)',
+                  lineHeight: 'var(--type-display-line-height)',
+                  fontWeight: 650,
+                  maxWidth: 520,
                 }}
               >
                 Compare stocks without
@@ -345,7 +356,7 @@ function ComparePageContent() {
                   maxWidth: 640,
                   color: 'var(--text-muted)',
                   fontSize: 15,
-                  lineHeight: 1.8,
+                  lineHeight: 'var(--type-body-line-height)',
                 }}
               >
                 Put two names against each other on price action and core
@@ -526,7 +537,9 @@ function ComparePageContent() {
                           style={{
                             margin: '12px 0 6px',
                             fontSize: 28,
-                            letterSpacing: '-0.05em',
+                            letterSpacing: 'var(--type-title-tracking)',
+                            lineHeight: 'var(--type-title-line-height)',
+                            fontWeight: 650,
                           }}
                         >
                           {fundamentals?.name || snapshot.ticker}
@@ -547,9 +560,9 @@ function ComparePageContent() {
                         <span
                           style={{
                             fontSize: 36,
-                            fontWeight: 700,
+                            fontWeight: 650,
                             fontFamily: 'var(--font-dm-mono, monospace)',
-                            letterSpacing: '-0.05em',
+                            letterSpacing: '-0.03em',
                           }}
                         >
                           ${formatPrice(quote.price)}
@@ -567,7 +580,7 @@ function ComparePageContent() {
                           }}
                         >
                           {positive ? '+' : ''}
-                          {quote.change.toFixed(2)} ({quote.changePercent}%)
+                          {quote.change.toFixed(2)} ({formatChangePct(quote.changePercent)})
                         </span>
                       </div>
                     ) : (
@@ -579,7 +592,7 @@ function ComparePageContent() {
                         margin: '14px 0 0',
                         color: 'var(--text-muted)',
                         fontSize: 14,
-                        lineHeight: 1.75,
+                        lineHeight: 'var(--type-body-line-height)',
                       }}
                     >
                       {fundamentals?.description || 'Fundamentals description unavailable for this ticker in the current dataset.'}

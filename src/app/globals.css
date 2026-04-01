@@ -26,6 +26,13 @@
     --shadow-soft: 0 18px 50px rgba(35, 21, 74, 0.08);
     --shadow-strong: 0 26px 80px rgba(35, 21, 74, 0.16);
     --font-dm-mono: var(--font-geist-mono);
+    --font-sans: var(--font-ui-sans);
+    --type-display-line-height: 1.02;
+    --type-display-tracking: -0.045em;
+    --type-title-line-height: 1.08;
+    --type-title-tracking: -0.03em;
+    --type-body-line-height: 1.72;
+    --type-eyebrow-tracking: 0.14em;
   }
 
   @media (prefers-color-scheme: dark) {
@@ -62,6 +69,9 @@
       radial-gradient(circle at top left, rgba(111, 61, 244, 0.18), transparent 28%),
       radial-gradient(circle at top right, rgba(243, 198, 35, 0.14), transparent 24%),
       var(--bg);
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   body {
@@ -73,7 +83,8 @@
       linear-gradient(180deg, transparent, rgba(111, 61, 244, 0.03)),
       var(--bg);
     color: var(--text);
-    font-family: var(--font-geist-sans), system-ui, sans-serif;
+    font-family: var(--font-sans), system-ui, sans-serif;
+    line-height: var(--type-body-line-height);
     transition: background-color 0.2s ease, color 0.2s ease;
   }
 

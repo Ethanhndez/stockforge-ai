@@ -7,49 +7,13 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-
-// ── Types ────────────────────────────────────────────────────
-
-interface FinancialSnapshot {
-  revenue: string
-  netIncome: string
-  operatingMargin: string
-  totalAssets: string
-  debtLoad: string
-  cashPosition: string
-  revenueGrowthNote?: string
-  epsNote?: string
-}
-
-interface CaseAnalysis {
-  headline: string
-  points: string[]
-  plainEnglish: string
-}
-
-interface ResearchPosture {
-  bull_case: string
-  bear_case: string
-  key_risks: string[]
-  data_gaps: string[]
-}
-
-interface Analysis {
-  companyName: string
-  ticker: string
-  analysisDate: string
-  executiveSummary: string
-  analystBrief: string
-  industryContext: string
-  financialSnapshot: FinancialSnapshot
-  bullCase: CaseAnalysis
-  bearCase: CaseAnalysis
-  keyRisks: string[]
-  recentNewsImpact: string
-  earningsQuality: string
-  data_sources: string[]   // required — empty array is a guardrail violation
-  researchPosture: ResearchPosture
-}
+import type {
+  AnalysisDebugPayload,
+  AnalysisExecutionPath,
+  AnalysisFallbackReason,
+  AnalysisQuality,
+  AnalysisResponse,
+} from '@/lib/ai/analysis-contract'
 
 // ── LoadingState subcomponent ────────────────────────────────
 // Driven by real SSE progress events from the server
@@ -151,20 +115,368 @@ function LoadingState({ steps, elapsed }: LoadingStateProps) {
       <p style={styles.elapsed}>
         {elapsed}s elapsed ·{' '}
         {elapsed >= 45
-          ? 'Still working — SEC filings can take longer for some tickers…'
-          : 'PhD-level analysis takes 45–90s'}
+          ? 'Still working — transparency checks and SEC reads can take longer for some tickers…'
+          : 'Research, validation, and source checks usually take 45–90s'}
       </p>
     </div>
+  )
+}
+
+function qualityTone(quality: AnalysisQuality): {
+  label: string
+  color: string
+  background: string
+  description: string
+} {
+  switch (quality) {
+    case 'complete':
+      return {
+        label: 'Complete',
+        color: 'var(--green)',
+        background: 'var(--green-bg)',
+        description: 'No reported tool failures or material data gaps were carried into the final analysis.',
+      }
+    case 'degraded':
+      return {
+        label: 'Degraded',
+        color: 'var(--accent)',
+        background: 'color-mix(in srgb, var(--accent) 18%, transparent)',
+        description: 'The analysis is valid, but some data gaps or tool degradation reduced coverage.',
+      }
+    case 'limited':
+      return {
+        label: 'Limited',
+        color: 'var(--red)',
+        background: 'var(--red-bg)',
+        description: 'Fallback or missing support materially narrowed the evidence behind this report.',
+      }
+  }
+}
+
+function formatExecutionPath(path: AnalysisExecutionPath): string {
+  return path === 'parallel' ? 'Parallel agents' : 'Legacy fallback'
+}
+
+function formatFallbackReason(reason: AnalysisFallbackReason | undefined): string {
+  switch (reason) {
+    case 'validation_failed':
+      return 'Parallel output failed validation'
+    case 'tool_failure':
+      return 'A required source tool failed'
+    case 'timeout':
+      return 'Parallel path timed out'
+    case 'parallel_error':
+      return 'Parallel orchestration failed'
+    default:
+      return 'No fallback reason recorded'
+  }
+}
+
+function TrustPanel({ debug }: { debug: AnalysisDebugPayload }) {
+  const quality = qualityTone(debug.transparency.analysisQuality)
+  const hasIssues =
+    debug.transparency.missingData.length > 0 || debug.transparency.toolErrors.length > 0
+
+  return (
+    <div style={styles.trustCard}>
+      <div style={styles.trustHeader}>
+        <div>
+          <span style={styles.sectionLabel}>Trust & Transparency</span>
+          <p style={styles.trustIntro}>
+            This panel shows how the analysis was produced, where coverage narrowed, and whether fallback logic was used.
+          </p>
+        </div>
+        <span
+          style={{
+            ...styles.qualityBadge,
+            color: quality.color,
+            background: quality.background,
+            borderColor: quality.color,
+          }}
+        >
+          {quality.label} coverage
+        </span>
+      </div>
+
+      <div style={styles.trustMetrics}>
+        <div style={styles.trustMetricCard}>
+          <span style={styles.trustMetricLabel}>Execution Path</span>
+          <span style={styles.trustMetricValue}>{formatExecutionPath(debug.execution.path)}</span>
+        </div>
+        <div style={styles.trustMetricCard}>
+          <span style={styles.trustMetricLabel}>Validation</span>
+          <span style={styles.trustMetricValue}>
+            {debug.execution.validationPassed ? 'Passed' : 'Failed'}
+          </span>
+        </div>
+        <div style={styles.trustMetricCard}>
+          <span style={styles.trustMetricLabel}>Sources Used</span>
+          <span style={styles.trustMetricValue}>{debug.transparency.dataSourcesUsed.length}</span>
+        </div>
+        <div style={styles.trustMetricCard}>
+          <span style={styles.trustMetricLabel}>Coverage Gaps</span>
+          <span style={styles.trustMetricValue}>
+            {debug.transparency.missingData.length + debug.transparency.toolErrors.length}
+          </span>
+        </div>
+      </div>
+
+      <div style={styles.trustStatus}>
+        <span style={{ ...styles.statusDot, background: quality.color }} />
+        <span style={styles.trustStatusText}>{quality.description}</span>
+      </div>
+
+      {debug.execution.path === 'fallback' && (
+        <div style={styles.fallbackNotice}>
+          <span style={styles.fallbackLabel}>Fallback Path</span>
+          <span style={styles.fallbackText}>
+            {formatFallbackReason(debug.execution.fallbackReason)}
+          </span>
+        </div>
+      )}
+
+      <div style={styles.trustColumns}>
+        <div style={styles.trustListCard}>
+          <h3 style={styles.cardTitle}>Missing Data</h3>
+          {debug.transparency.missingData.length > 0 ? (
+            <div style={styles.gapList}>
+              {debug.transparency.missingData.map((gap, index) => (
+                <div key={`${gap}-${index}`} style={styles.gapItem}>
+                  <span style={styles.gapIcon}>◌</span>
+                  <span style={styles.riskText}>{gap}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p style={styles.bodyText}>No explicit missing-data items were carried into the final report.</p>
+          )}
+        </div>
+
+        <div style={styles.trustListCard}>
+          <h3 style={styles.cardTitle}>Tool Degradation</h3>
+          {debug.transparency.toolErrors.length > 0 ? (
+            <div style={styles.gapList}>
+              {debug.transparency.toolErrors.map((error, index) => (
+                <div key={`${error}-${index}`} style={styles.gapItem}>
+                  <span style={{ ...styles.gapIcon, color: 'var(--red)' }}>!</span>
+                  <span style={styles.riskText}>{error}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p style={styles.bodyText}>No tool failures were surfaced in the sanitized execution summary.</p>
+          )}
+        </div>
+      </div>
+
+      <div style={styles.trustSources}>
+        <h3 style={styles.cardTitle}>Grounded Sources</h3>
+        {debug.transparency.dataSourcesUsed.length > 0 ? (
+          <div style={styles.sourceChipGrid}>
+            {debug.transparency.dataSourcesUsed.map((source) => (
+              <span key={source} style={styles.sourceChip}>
+                {source}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p style={styles.bodyText}>No source list was captured for this analysis.</p>
+        )}
+      </div>
+
+      {!hasIssues && (
+        <p style={styles.trustFootnote}>
+          Transparency details are available because this stock page requests debug coverage from the analysis route.
+        </p>
+      )}
+    </div>
+  )
+}
+
+function titleFromSourceCategory(source: string): string {
+  const lower = source.toLowerCase()
+
+  if (lower.includes('sec') || lower.includes('edgar') || lower.includes('10-k') || lower.includes('10-q') || lower.includes('8-k')) {
+    return 'SEC & Filings'
+  }
+
+  if (lower.includes('news') || lower.includes('sentiment')) {
+    return 'News & Sentiment'
+  }
+
+  if (
+    lower.includes('polygon') ||
+    lower.includes('quote') ||
+    lower.includes('financials') ||
+    lower.includes('market') ||
+    lower.includes('ticker')
+  ) {
+    return 'Market Data'
+  }
+
+  if (lower.includes('rag') || lower.includes('supabase') || lower.includes('context')) {
+    return 'Research Context'
+  }
+
+  return 'Analysis Inputs'
+}
+
+function groupDataSources(sources: string[]) {
+  const grouped = new Map<string, string[]>()
+
+  for (const source of sources) {
+    const title = titleFromSourceCategory(source)
+    const existing = grouped.get(title) ?? []
+    existing.push(source)
+    grouped.set(title, existing)
+  }
+
+  return Array.from(grouped.entries()).map(([title, entries]) => ({
+    title,
+    entries,
+  }))
+}
+
+function MethodologySection({
+  analysis,
+  debug,
+}: {
+  analysis: AnalysisResponse
+  debug?: AnalysisDebugPayload
+}) {
+  const compositionRows = [
+    {
+      label: 'Execution Path',
+      value: formatExecutionPath(debug?.execution.path ?? 'fallback'),
+      detail:
+        debug?.execution.path === 'parallel'
+          ? 'Parallel synthesis path'
+          : 'Fallback-safe route',
+      purpose: 'How the final report was assembled',
+    },
+    {
+      label: 'Validation',
+      value: debug?.execution.validationPassed ? 'Passed' : 'Pending / fallback',
+      detail: `${analysis.data_sources.length} grounded sources`,
+      purpose: 'Output contract and coverage checks',
+    },
+    {
+      label: 'Coverage',
+      value: debug ? qualityTone(debug.transparency.analysisQuality).label : 'Available',
+      detail: `${debug?.transparency.missingData.length ?? 0} missing-data items`,
+      purpose: 'Signal quality after tool execution',
+    },
+    {
+      label: 'Gaps',
+      value: `${analysis.researchPosture.data_gaps.length}`,
+      detail: `${debug?.transparency.toolErrors.length ?? 0} tool issues`,
+      purpose: 'Explicit unknowns carried into the report',
+    },
+  ]
+
+  const methodologySteps = [
+    {
+      title: '1. Data Aggregation',
+      body:
+        'Quote data, company reference fields, filings context, and source metadata are assembled before synthesis.',
+    },
+    {
+      title: '2. Structured Synthesis',
+      body:
+        'The report frames both upside and downside cases, then translates the findings into plain-English research output.',
+    },
+    {
+      title: '3. Validation & Transparency',
+      body:
+        'Coverage gaps, fallback behavior, and grounded source lists are surfaced instead of being hidden or estimated away.',
+    },
+  ]
+
+  const groupedSources = groupDataSources(
+    debug?.transparency.dataSourcesUsed?.length
+      ? debug.transparency.dataSourcesUsed
+      : analysis.data_sources
+  )
+
+  return (
+    <section style={styles.methodologySection}>
+      <div style={styles.methodologyIntro}>
+        <span style={styles.sectionLabel}>Transparency & Methodology</span>
+        <h3 style={styles.methodologyTitle}>How this research page was built</h3>
+        <p style={styles.methodologyCopy}>
+          The interface presents the analysis as a clean investment memo, but
+          the underlying report still shows where data came from, what was
+          validated, and what remained incomplete.
+        </p>
+      </div>
+
+      <div style={styles.compositionTable}>
+        <div style={styles.compositionHeaderRow}>
+          <span style={styles.compositionHeader}>Signal Layer</span>
+          <span style={styles.compositionHeader}>Current State</span>
+          <span style={styles.compositionHeader}>Detail</span>
+          <span style={styles.compositionHeader}>Purpose</span>
+        </div>
+        {compositionRows.map((row) => (
+          <div key={row.label} style={styles.compositionRow}>
+            <span style={styles.compositionPrimary}>{row.label}</span>
+            <span style={styles.compositionValue}>{row.value}</span>
+            <span style={styles.compositionDetail}>{row.detail}</span>
+            <span style={styles.compositionPurpose}>{row.purpose}</span>
+          </div>
+        ))}
+      </div>
+
+      <div style={styles.methodologyGrid}>
+        {methodologySteps.map((step) => (
+          <div key={step.title} style={styles.methodCard}>
+            <h4 style={styles.methodCardTitle}>{step.title}</h4>
+            <p style={styles.methodCardBody}>{step.body}</p>
+          </div>
+        ))}
+      </div>
+
+      {groupedSources.length > 0 ? (
+        <div style={styles.sourceSection}>
+          <h4 style={styles.sourceSectionTitle}>Data Sources</h4>
+          <div style={styles.sourceCardGrid}>
+            {groupedSources.map((group) => (
+              <div key={group.title} style={styles.sourceCard}>
+                <div style={styles.sourceCardHeader}>
+                  <span style={styles.sourceCardTitle}>{group.title}</span>
+                  <span style={styles.sourceCount}>{group.entries.length} items</span>
+                </div>
+                <div style={styles.sourceList}>
+                  {group.entries.map((entry) => (
+                    <div key={entry} style={styles.sourceListItem}>
+                      <span style={styles.sourceBullet}>•</span>
+                      <span style={styles.sourceListText}>{entry}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <div style={styles.methodDisclaimer}>
+        AI-generated research for informational purposes only. This page is a
+        research workflow, not personalized investment advice. Verify material
+        claims against primary filings and current market data.
+      </div>
+    </section>
   )
 }
 
 // ── Main AnalysisSection component ──────────────────────────
 
 export default function AnalysisSection({ ticker }: { ticker: string }) {
-  const [analysis, setAnalysis] = useState<Analysis | null>(null)
+  const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [started, setStarted] = useState(false)
+  const [runNonce, setRunNonce] = useState(0)
   const [liveSteps, setLiveSteps] = useState<string[]>([])
   const [elapsed, setElapsed] = useState(0)
 
@@ -181,7 +493,7 @@ export default function AnalysisSection({ ticker }: { ticker: string }) {
         const res = await fetch('/api/analysis', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ticker }),
+          body: JSON.stringify({ ticker, includeDebug: true }),
         })
 
         // Guard: if server returned a non-stream response (e.g. 400/500 JSON)
@@ -239,7 +551,7 @@ export default function AnalysisSection({ ticker }: { ticker: string }) {
                 })
               } else if (event.type === 'complete') {
                 completed = true
-                setAnalysis(event.analysis as Analysis)
+                setAnalysis(event.analysis as AnalysisResponse)
                 setLoading(false)
                 clearInterval(interval)
               } else if (event.type === 'error') {
@@ -270,7 +582,7 @@ export default function AnalysisSection({ ticker }: { ticker: string }) {
     streamAnalysis()
 
     return () => clearInterval(interval)
-  }, [started, ticker])
+  }, [runNonce, started, ticker])
 
   if (!started) {
     return (
@@ -283,6 +595,7 @@ export default function AnalysisSection({ ticker }: { ticker: string }) {
           setElapsed(0)
           setLoading(true)
           setStarted(true)
+          setRunNonce((value) => value + 1)
         }}
       />
     )
@@ -296,6 +609,21 @@ export default function AnalysisSection({ ticker }: { ticker: string }) {
         <span style={{ fontSize: 28 }}>⚠</span>
         <h3 style={{ color: 'var(--red)', margin: '12px 0 0', fontSize: 18 }}>Analysis Error</h3>
         <p style={{ color: 'var(--text-muted)', margin: '8px 0 0', fontSize: 14 }}>{error}</p>
+        <button
+          type="button"
+          style={{ ...styles.startButton, marginTop: 18 }}
+          onClick={() => {
+            setError(null)
+            setAnalysis(null)
+            setLiveSteps([])
+            setElapsed(0)
+            setLoading(true)
+            setStarted(true)
+            setRunNonce((value) => value + 1)
+          }}
+        >
+          Retry Analysis
+        </button>
       </div>
     )
   }
@@ -303,18 +631,59 @@ export default function AnalysisSection({ ticker }: { ticker: string }) {
   if (!analysis) return null
 
   const posture = analysis.researchPosture
+  const debug = analysis.debug
+  const qualityBadge = debug
+    ? qualityTone(debug.transparency.analysisQuality).label
+    : 'Grounded'
+  const hasRealtimeSource = analysis.data_sources.some((source) =>
+    /polygon|quote|news|market/i.test(source)
+  )
 
   return (
     <div style={styles.analysisWrapper}>
-
-      {/* ── Section header ─────────────────────────────────── */}
       <div style={styles.sectionHeader}>
-        <span style={styles.sectionLabel}>AI RESEARCH ANALYSIS</span>
+        <div>
+          <div style={styles.analysisTitleRow}>
+            <div style={styles.analysisIcon}>✦</div>
+            <div>
+              <h2 style={styles.analysisTitle}>AI Investment Analysis</h2>
+              <p style={styles.analysisSubtitle}>
+                Multi-source synthesis shaped into a cleaner research memo for {ticker}.
+              </p>
+            </div>
+          </div>
+
+          <div style={styles.headerBadges}>
+            <span style={styles.analysisStatusPill}>Verified Sources</span>
+            {hasRealtimeSource ? (
+              <span style={{ ...styles.analysisStatusPill, color: 'var(--purple)' }}>
+                Real-time Data
+              </span>
+            ) : null}
+            <span style={styles.analysisStatusPill}>{qualityBadge} Coverage</span>
+          </div>
+        </div>
         <span style={styles.analysisDate}>Generated {analysis.analysisDate}</span>
       </div>
 
-      {/* ── Executive Summary ──────────────────────────────── */}
-      <div style={styles.card}>
+      <div style={styles.summaryHero}>
+        <div style={styles.signalCard}>
+          <div style={styles.signalEyebrowRow}>
+            <span style={styles.signalEyebrow}>Bullish Outlook</span>
+            <span style={styles.signalCaption}>{analysis.bullCase.headline}</span>
+          </div>
+          <p style={styles.signalText}>{posture.bull_case}</p>
+        </div>
+        <div style={styles.signalCardSecondary}>
+          <div style={styles.signalEyebrowRow}>
+            <span style={styles.signalEyebrow}>Caution Areas</span>
+            <span style={styles.signalCaption}>{analysis.bearCase.headline}</span>
+          </div>
+          <p style={styles.signalText}>{posture.bear_case}</p>
+        </div>
+      </div>
+
+      <div style={styles.executiveCard}>
         <p style={styles.execSummary}>{analysis.executiveSummary}</p>
         <div style={styles.industryTag}>
           <span style={styles.tagDot} />
@@ -322,86 +691,71 @@ export default function AnalysisSection({ ticker }: { ticker: string }) {
         </div>
       </div>
 
-      {/* ── Financial Snapshot ─────────────────────────────── */}
-      <div style={styles.card}>
-        <h3 style={styles.cardTitle}>Financial Snapshot</h3>
-        <div style={styles.financialGrid}>
-          <FinancialCell label="Revenue" value={analysis.financialSnapshot.revenue} />
-          <FinancialCell label="Net Income" value={analysis.financialSnapshot.netIncome} />
-          <FinancialCell label="Operating Margin" value={analysis.financialSnapshot.operatingMargin} accent />
-          <FinancialCell label="Total Assets" value={analysis.financialSnapshot.totalAssets} />
-          <FinancialCell label="Cash Position" value={analysis.financialSnapshot.cashPosition} />
-          <FinancialCell label="EPS" value={analysis.financialSnapshot.epsNote || '—'} />
+      <div style={styles.highlightGrid}>
+        <div style={styles.highlightCard}>
+          <span style={styles.highlightLabel}>Revenue</span>
+          <span style={styles.highlightValue}>{analysis.financialSnapshot.revenue}</span>
+          <span style={styles.highlightNote}>
+            {analysis.financialSnapshot.revenueGrowthNote || 'Revenue growth detail unavailable.'}
+          </span>
         </div>
-        {analysis.financialSnapshot.debtLoad && (
-          <div style={styles.debtNote}>
-            <span style={styles.noteIcon}>◈</span>
-            <span>{analysis.financialSnapshot.debtLoad}</span>
-          </div>
-        )}
-      </div>
-
-      {/* ── Bull / Bear cases ──────────────────────────────── */}
-      <div style={styles.twoCol}>
-        {/* Bull Case */}
-        <div style={{ ...styles.caseCard, borderColor: 'var(--green)' }}>
-          <div style={styles.caseHeader}>
-            <span style={{ ...styles.caseBadge, background: 'var(--green-bg)', color: 'var(--green)' }}>
-              ▲ BULL CASE
-            </span>
-            <span style={styles.caseHeadline}>{analysis.bullCase.headline}</span>
-          </div>
-          <ul style={styles.casePoints}>
-            {analysis.bullCase.points.map((pt, i) => (
-              <li key={i} style={styles.casePoint}>
-                <span style={{ color: 'var(--green)', marginRight: 8 }}>+</span>
-                {pt}
-              </li>
-            ))}
-          </ul>
-          <div style={styles.plainEnglishBox}>
-            <span style={styles.plainLabel}>Plain English</span>
-            <p style={styles.plainText}>{analysis.bullCase.plainEnglish}</p>
-          </div>
+        <div style={styles.highlightCard}>
+          <span style={styles.highlightLabel}>Net Income</span>
+          <span style={styles.highlightValue}>{analysis.financialSnapshot.netIncome}</span>
+          <span style={styles.highlightNote}>{analysis.financialSnapshot.debtLoad}</span>
         </div>
-
-        {/* Bear Case */}
-        <div style={{ ...styles.caseCard, borderColor: 'var(--red)' }}>
-          <div style={styles.caseHeader}>
-            <span style={{ ...styles.caseBadge, background: 'var(--red-bg)', color: 'var(--red)' }}>
-              ▼ BEAR CASE
-            </span>
-            <span style={styles.caseHeadline}>{analysis.bearCase.headline}</span>
-          </div>
-          <ul style={styles.casePoints}>
-            {analysis.bearCase.points.map((pt, i) => (
-              <li key={i} style={styles.casePoint}>
-                <span style={{ color: 'var(--red)', marginRight: 8 }}>−</span>
-                {pt}
-              </li>
-            ))}
-          </ul>
-          <div style={styles.plainEnglishBox}>
-            <span style={styles.plainLabel}>Plain English</span>
-            <p style={styles.plainText}>{analysis.bearCase.plainEnglish}</p>
-          </div>
+        <div style={styles.highlightCard}>
+          <span style={styles.highlightLabel}>Operating Margin</span>
+          <span style={styles.highlightValue}>{analysis.financialSnapshot.operatingMargin}</span>
+          <span style={styles.highlightNote}>
+            Cash position {analysis.financialSnapshot.cashPosition}
+          </span>
+        </div>
+        <div style={styles.highlightCard}>
+          <span style={styles.highlightLabel}>EPS Context</span>
+          <span style={styles.highlightValue}>
+            {analysis.financialSnapshot.epsNote || 'Data unavailable'}
+          </span>
+          <span style={styles.highlightNote}>Total assets {analysis.financialSnapshot.totalAssets}</span>
         </div>
       </div>
 
-      {/* ── Key Risks ──────────────────────────────────────── */}
-      <div style={styles.card}>
-        <h3 style={styles.cardTitle}>Key Risks</h3>
-        <div style={styles.riskList}>
-          {analysis.keyRisks.map((risk, i) => (
-            <div key={i} style={styles.riskItem}>
-              <span style={styles.riskNum}>{i + 1}</span>
-              <span style={styles.riskText}>{risk}</span>
+      <div style={styles.sectionBlock}>
+        <span style={styles.sectionLabel}>Key Investment Drivers</span>
+        <div style={styles.longformList}>
+          {analysis.bullCase.points.map((point, index) => (
+            <div key={point} style={styles.longformRow}>
+              <span style={styles.driverDot}>●</span>
+              <div>
+                <div style={styles.longformTitle}>
+                  {index === 0 ? analysis.bullCase.headline : `Driver ${index + 1}`}
+                </div>
+                <p style={styles.longformText}>{point}</p>
+              </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* ── News Impact + Earnings Quality ─────────────────── */}
+      <div style={styles.sectionDivider} />
+
+      <div style={styles.sectionBlock}>
+        <span style={styles.sectionLabel}>Key Risks To Monitor</span>
+        <div style={styles.longformList}>
+          {analysis.keyRisks.map((risk, index) => (
+            <div key={risk} style={styles.longformRow}>
+              <span style={styles.riskIcon}>△</span>
+              <div>
+                <div style={styles.longformTitle}>
+                  {index === 0 ? analysis.bearCase.headline : `Risk ${index + 1}`}
+                </div>
+                <p style={styles.longformText}>{risk}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div style={styles.twoCol}>
         <div style={styles.card}>
           <h3 style={styles.cardTitle}>Recent News Impact</h3>
@@ -413,42 +767,27 @@ export default function AnalysisSection({ ticker }: { ticker: string }) {
         </div>
       </div>
 
-      {/* ── Research Summary ────────────────────────────────── */}
       <div style={styles.summaryCard}>
-        <span style={styles.summaryLabel}>RESEARCH SUMMARY</span>
+        <span style={styles.summaryLabel}>Research Summary</span>
 
         <div style={styles.twoCol}>
           <div style={styles.summaryCase}>
             <span style={{ ...styles.caseBadge, background: 'var(--green-bg)', color: 'var(--green)' }}>
-              ▲ BULL FACTORS
+              ▲ Bull Factors
             </span>
-            <p style={styles.summaryText}>{posture.bull_case}</p>
+            <p style={styles.summaryText}>{analysis.bullCase.plainEnglish}</p>
           </div>
           <div style={styles.summaryCase}>
             <span style={{ ...styles.caseBadge, background: 'var(--red-bg)', color: 'var(--red)' }}>
-              ▼ BEAR FACTORS
+              ▼ Bear Factors
             </span>
-            <p style={styles.summaryText}>{posture.bear_case}</p>
+            <p style={styles.summaryText}>{analysis.bearCase.plainEnglish}</p>
           </div>
         </div>
 
-        {posture.key_risks.length > 0 && (
-          <div style={styles.summaryRisks}>
-            <span style={styles.summarySubLabel}>Key Risks</span>
-            <div style={styles.riskList}>
-              {posture.key_risks.map((risk, i) => (
-                <div key={i} style={styles.riskItem}>
-                  <span style={styles.riskNum}>{i + 1}</span>
-                  <span style={styles.riskText}>{risk}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {posture.data_gaps.length > 0 && (
+        {posture.data_gaps.length > 0 ? (
           <div style={styles.dataGaps}>
-            <span style={styles.summarySubLabel}>Data Gaps</span>
+            <span style={styles.summarySubLabel}>Known Data Gaps</span>
             <div style={styles.gapList}>
               {posture.data_gaps.map((gap, i) => (
                 <div key={i} style={styles.gapItem}>
@@ -458,10 +797,9 @@ export default function AnalysisSection({ ticker }: { ticker: string }) {
               ))}
             </div>
           </div>
-        )}
+        ) : null}
       </div>
 
-      {/* ── Deep Dive (analyst brief) ──────────────────────── */}
       <details style={styles.deepDive}>
         <summary style={styles.deepDiveSummary}>
           ◈ Deep Dive — Technical Analyst Brief
@@ -470,54 +808,19 @@ export default function AnalysisSection({ ticker }: { ticker: string }) {
         <p style={styles.deepDiveText}>{analysis.analystBrief}</p>
       </details>
 
-      {/* ── Data Sources Attribution ────────────────────────── */}
-      {analysis.data_sources?.length > 0 && (
-        <div style={styles.card}>
-          <h3 style={styles.cardTitle}>Data Sources</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {analysis.data_sources.map((src, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                <span style={{ color: 'var(--accent)', fontSize: 12, paddingTop: 2, flexShrink: 0 }}>◈</span>
-                <span style={{ fontSize: 12, color: 'var(--text-dim)', fontFamily: 'var(--font-dm-mono, monospace)', lineHeight: 1.6 }}>
-                  {src}
-                </span>
-              </div>
-            ))}
+      <MethodologySection analysis={analysis} debug={debug} />
+
+      {debug ? (
+        <details style={styles.deepDive}>
+          <summary style={styles.deepDiveSummary}>
+            ◈ Execution Transparency
+            <span style={styles.deepDiveHint}>(advanced diagnostics)</span>
+          </summary>
+          <div style={{ marginTop: 18 }}>
+            <TrustPanel debug={debug} />
           </div>
-        </div>
-      )}
-
-      {/* ── Disclaimer ─────────────────────────────────────── */}
-      <p style={styles.disclaimer}>
-        AI-generated research for informational purposes only. Not financial advice.
-        Always verify with primary sources before making investment decisions.
-      </p>
-    </div>
-  )
-}
-
-// ── FinancialCell helper ─────────────────────────────────────
-
-function FinancialCell({
-  label,
-  value,
-  accent,
-}: {
-  label: string
-  value: string
-  accent?: boolean
-}) {
-  return (
-    <div style={styles.finCell}>
-      <span style={styles.finLabel}>{label}</span>
-      <span
-        style={{
-          ...styles.finValue,
-          color: accent ? 'var(--accent)' : 'var(--text)',
-        }}
-      >
-        {value}
-      </span>
+        </details>
+      ) : null}
     </div>
   )
 }
@@ -695,10 +998,513 @@ const styles: Record<string, React.CSSProperties> = {
     color: 'var(--purple)',
     textTransform: 'uppercase' as const,
   },
+  headerMeta: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10,
+  },
+  headerBadges: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  headerBadge: {
+    padding: '7px 10px',
+    borderRadius: 999,
+    border: '1px solid var(--border)',
+    background: 'var(--bg-panel)',
+    color: 'var(--text-muted)',
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase' as const,
+  },
   analysisDate: {
     fontSize: 12,
     color: 'var(--text-dim)',
     fontFamily: 'var(--font-dm-mono, monospace)',
+  },
+  analysisTitleRow: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: 14,
+  },
+  analysisIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    display: 'grid',
+    placeItems: 'center',
+    background: 'color-mix(in srgb, var(--purple-soft) 88%, var(--bg-card))',
+    color: 'var(--purple)',
+    flexShrink: 0,
+    fontSize: 16,
+  },
+  analysisTitle: {
+    margin: 0,
+    fontSize: 'clamp(28px, 4vw, 44px)',
+    lineHeight: 'var(--type-title-line-height)',
+    letterSpacing: 'var(--type-title-tracking)',
+    fontWeight: 650,
+    color: 'var(--text)',
+  },
+  analysisSubtitle: {
+    margin: '6px 0 0',
+    color: 'var(--text-muted)',
+    fontSize: 15,
+    lineHeight: 1.7,
+  },
+  analysisStatusPill: {
+    padding: '8px 12px',
+    borderRadius: 12,
+    border: '1px solid var(--border)',
+    background: 'var(--bg-panel)',
+    color: 'var(--text-muted)',
+    fontSize: 13,
+    fontWeight: 600,
+  },
+  summaryHero: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+    gap: 16,
+  },
+  signalCard: {
+    background:
+      'linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 96%, transparent), color-mix(in srgb, var(--green-bg) 18%, transparent))',
+    border: '1px solid var(--border)',
+    borderRadius: 28,
+    padding: '24px',
+    boxShadow: 'var(--shadow-soft)',
+  },
+  signalCardSecondary: {
+    background:
+      'linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 96%, transparent), color-mix(in srgb, var(--red-bg) 16%, transparent))',
+    border: '1px solid var(--border)',
+    borderRadius: 28,
+    padding: '24px',
+    boxShadow: 'var(--shadow-soft)',
+  },
+  signalEyebrowRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 10,
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  signalEyebrow: {
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: '0.16em',
+    color: 'var(--text-muted)',
+    textTransform: 'uppercase' as const,
+  },
+  signalCaption: {
+    fontSize: 13,
+    color: 'var(--text-dim)',
+    fontWeight: 600,
+  },
+  signalText: {
+    margin: 0,
+    color: 'var(--text)',
+    fontSize: 16,
+    lineHeight: 1.75,
+  },
+  executiveCard: {
+    background:
+      'linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 96%, transparent), color-mix(in srgb, var(--bg-panel) 94%, transparent))',
+    border: '1px solid var(--border)',
+    borderRadius: 28,
+    padding: '24px',
+    boxShadow: 'var(--shadow-soft)',
+  },
+  highlightGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+    gap: 16,
+  },
+  highlightCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10,
+    padding: '22px',
+    borderRadius: 24,
+    border: '1px solid var(--border)',
+    background: 'var(--bg-card)',
+    boxShadow: 'var(--shadow-soft)',
+  },
+  highlightLabel: {
+    fontSize: 11,
+    color: 'var(--text-dim)',
+    letterSpacing: 'var(--type-eyebrow-tracking)',
+    textTransform: 'uppercase' as const,
+    fontWeight: 650,
+  },
+  highlightValue: {
+    fontSize: 26,
+    color: 'var(--text)',
+    lineHeight: 1.2,
+    letterSpacing: '-0.03em',
+    fontWeight: 650,
+  },
+  highlightNote: {
+    fontSize: 13,
+    color: 'var(--text-muted)',
+    lineHeight: 1.7,
+  },
+  sectionBlock: {
+    display: 'grid',
+    gap: 18,
+    paddingTop: 8,
+  },
+  longformList: {
+    display: 'grid',
+    gap: 24,
+  },
+  longformRow: {
+    display: 'grid',
+    gridTemplateColumns: '16px minmax(0, 1fr)',
+    gap: 14,
+    alignItems: 'flex-start',
+  },
+  driverDot: {
+    color: 'var(--purple)',
+    fontSize: 10,
+    paddingTop: 10,
+  },
+  riskIcon: {
+    color: 'var(--text-dim)',
+    fontSize: 16,
+    paddingTop: 4,
+  },
+  longformTitle: {
+    fontSize: 18,
+    lineHeight: 1.4,
+    color: 'var(--text)',
+    fontWeight: 650,
+    marginBottom: 6,
+    letterSpacing: '-0.02em',
+  },
+  longformText: {
+    margin: 0,
+    fontSize: 15,
+    color: 'var(--text-muted)',
+    lineHeight: 1.78,
+  },
+  sectionDivider: {
+    height: 1,
+    background: 'var(--border)',
+    margin: '4px 0',
+  },
+  methodologySection: {
+    display: 'grid',
+    gap: 22,
+    paddingTop: 10,
+  },
+  methodologyIntro: {
+    display: 'grid',
+    gap: 10,
+  },
+  methodologyTitle: {
+    margin: 0,
+    fontSize: 'clamp(28px, 4vw, 42px)',
+    lineHeight: 'var(--type-title-line-height)',
+    letterSpacing: 'var(--type-title-tracking)',
+    fontWeight: 650,
+    color: 'var(--text)',
+  },
+  methodologyCopy: {
+    margin: 0,
+    maxWidth: 760,
+    fontSize: 15,
+    color: 'var(--text-muted)',
+    lineHeight: 1.75,
+  },
+  compositionTable: {
+    border: '1px solid var(--border)',
+    borderRadius: 24,
+    overflow: 'hidden',
+    background: 'var(--bg-card)',
+    boxShadow: 'var(--shadow-soft)',
+  },
+  compositionHeaderRow: {
+    display: 'grid',
+    gridTemplateColumns: '1.2fr 1fr 1fr 1.2fr',
+    gap: 16,
+    padding: '14px 20px',
+    background: 'var(--bg-panel)',
+    borderBottom: '1px solid var(--border)',
+  },
+  compositionHeader: {
+    fontSize: 11,
+    color: 'var(--text-dim)',
+    letterSpacing: 'var(--type-eyebrow-tracking)',
+    textTransform: 'uppercase' as const,
+    fontWeight: 650,
+  },
+  compositionRow: {
+    display: 'grid',
+    gridTemplateColumns: '1.2fr 1fr 1fr 1.2fr',
+    gap: 16,
+    padding: '18px 20px',
+    borderBottom: '1px solid var(--border)',
+    alignItems: 'center',
+  },
+  compositionPrimary: {
+    fontSize: 15,
+    fontWeight: 650,
+    color: 'var(--text)',
+  },
+  compositionValue: {
+    fontSize: 15,
+    color: 'var(--text)',
+    fontWeight: 600,
+  },
+  compositionDetail: {
+    fontSize: 14,
+    color: 'var(--text-muted)',
+    lineHeight: 1.6,
+  },
+  compositionPurpose: {
+    fontSize: 14,
+    color: 'var(--text-muted)',
+    lineHeight: 1.6,
+  },
+  methodologyGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+    gap: 16,
+  },
+  methodCard: {
+    padding: '22px',
+    borderRadius: 22,
+    border: '1px solid var(--border)',
+    background: 'var(--bg-card)',
+    boxShadow: 'var(--shadow-soft)',
+  },
+  methodCardTitle: {
+    margin: 0,
+    color: 'var(--text)',
+    fontSize: 16,
+    fontWeight: 650,
+    lineHeight: 1.5,
+  },
+  methodCardBody: {
+    margin: '10px 0 0',
+    color: 'var(--text-muted)',
+    fontSize: 15,
+    lineHeight: 1.75,
+  },
+  sourceSection: {
+    display: 'grid',
+    gap: 16,
+  },
+  sourceSectionTitle: {
+    margin: 0,
+    fontSize: 16,
+    fontWeight: 650,
+    color: 'var(--text)',
+  },
+  sourceCardGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+    gap: 14,
+  },
+  sourceCard: {
+    padding: '18px',
+    borderRadius: 22,
+    border: '1px solid var(--border)',
+    background: 'var(--bg-card)',
+    boxShadow: 'var(--shadow-soft)',
+    display: 'grid',
+    gap: 12,
+  },
+  sourceCardHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    gap: 12,
+    alignItems: 'center',
+  },
+  sourceCardTitle: {
+    fontSize: 17,
+    fontWeight: 650,
+    color: 'var(--text)',
+  },
+  sourceCount: {
+    fontSize: 11,
+    color: 'var(--purple)',
+    fontWeight: 700,
+    letterSpacing: '0.12em',
+    textTransform: 'uppercase' as const,
+  },
+  sourceList: {
+    display: 'grid',
+    gap: 10,
+  },
+  sourceListItem: {
+    display: 'grid',
+    gridTemplateColumns: '10px minmax(0, 1fr)',
+    gap: 8,
+    alignItems: 'flex-start',
+  },
+  sourceBullet: {
+    color: 'var(--text-dim)',
+    fontSize: 14,
+  },
+  sourceListText: {
+    fontSize: 13,
+    color: 'var(--text-muted)',
+    lineHeight: 1.7,
+  },
+  methodDisclaimer: {
+    padding: '18px 20px',
+    borderRadius: 18,
+    border: '1px solid var(--border)',
+    background: 'var(--bg-panel)',
+    color: 'var(--text-muted)',
+    fontSize: 14,
+    lineHeight: 1.75,
+  },
+
+  trustCard: {
+    background:
+      'linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 94%, transparent), color-mix(in srgb, var(--bg-panel) 94%, transparent))',
+    border: '1px solid var(--border)',
+    borderRadius: 28,
+    padding: '24px',
+    boxShadow: 'var(--shadow-soft)',
+    backdropFilter: 'blur(14px)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 18,
+  },
+  trustHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 16,
+    flexWrap: 'wrap',
+  },
+  trustIntro: {
+    margin: '8px 0 0',
+    color: 'var(--text-muted)',
+    fontSize: 14,
+    lineHeight: 1.7,
+    maxWidth: 720,
+  },
+  qualityBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: '8px 12px',
+    borderRadius: 999,
+    border: '1px solid',
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: '0.14em',
+    textTransform: 'uppercase' as const,
+  },
+  trustMetrics: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+    gap: 12,
+  },
+  trustMetricCard: {
+    padding: '14px 16px',
+    borderRadius: 20,
+    border: '1px solid var(--border)',
+    background: 'var(--bg-panel)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+  },
+  trustMetricLabel: {
+    fontSize: 11,
+    color: 'var(--text-dim)',
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.12em',
+  },
+  trustMetricValue: {
+    fontSize: 16,
+    fontWeight: 700,
+    color: 'var(--text)',
+    lineHeight: 1.4,
+  },
+  trustStatus: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    padding: '12px 14px',
+    borderRadius: 18,
+    background: 'var(--bg-panel)',
+    border: '1px solid var(--border)',
+  },
+  statusDot: {
+    width: 9,
+    height: 9,
+    borderRadius: '50%',
+    flexShrink: 0,
+  },
+  trustStatusText: {
+    fontSize: 13,
+    lineHeight: 1.6,
+    color: 'var(--text-muted)',
+  },
+  fallbackNotice: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 10,
+    padding: '12px 14px',
+    borderRadius: 18,
+    background: 'color-mix(in srgb, var(--red-bg) 70%, transparent)',
+    border: '1px solid color-mix(in srgb, var(--red) 45%, var(--border))',
+  },
+  fallbackLabel: {
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: '0.12em',
+    textTransform: 'uppercase' as const,
+    color: 'var(--red)',
+  },
+  fallbackText: {
+    fontSize: 13,
+    color: 'var(--text-muted)',
+    lineHeight: 1.6,
+  },
+  trustColumns: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+    gap: 16,
+  },
+  trustListCard: {
+    padding: '20px',
+    borderRadius: 24,
+    border: '1px solid var(--border)',
+    background: 'var(--bg-panel)',
+  },
+  trustSources: {
+    borderTop: '1px solid var(--border)',
+    paddingTop: 18,
+  },
+  sourceChipGrid: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  sourceChip: {
+    padding: '10px 12px',
+    borderRadius: 16,
+    border: '1px solid var(--border)',
+    background: 'var(--bg-panel)',
+    color: 'var(--text-muted)',
+    fontSize: 12,
+    lineHeight: 1.6,
+    fontFamily: 'var(--font-dm-mono, monospace)',
+  },
+  trustFootnote: {
+    margin: 0,
+    fontSize: 12,
+    lineHeight: 1.6,
+    color: 'var(--text-dim)',
   },
 
   // Generic card

@@ -53,6 +53,19 @@ interface FundamentalsSnapshot {
   sector: string | null
 }
 
+function latestIsoTimestamp(values: Array<string | null | undefined>): string | null {
+  const timestamps = values
+    .filter((value): value is string => Boolean(value))
+    .map((value) => new Date(value).getTime())
+    .filter((value) => Number.isFinite(value))
+
+  if (timestamps.length === 0) {
+    return null
+  }
+
+  return new Date(Math.max(...timestamps)).toISOString()
+}
+
 async function validateTickerViaPolygon(ticker: string): Promise<boolean> {
   if (process.env.NEXT_PUBLIC_USE_FIXTURES === 'true') {
     return ticker in FIXTURE_QUOTES
@@ -286,6 +299,7 @@ export async function ensurePortfolioWorkspace(userId: string) {
 
 export async function getPortfolioDashboardData(userId: string): Promise<PortfolioDashboardData> {
   const supabase = await createClient()
+  const dashboardGeneratedAt = new Date().toISOString()
   const [{ investment, watchlist }, userSettings] = await Promise.all([
     ensurePortfolioWorkspace(userId),
     getOrCreateUserSettings(userId),
@@ -337,6 +351,7 @@ export async function getPortfolioDashboardData(userId: string): Promise<Portfol
       currentValue,
       weight: 0,
       sector: fundamentals[holding.ticker]?.sector ?? null,
+      updatedAt: holding.updated_at,
     }
   })
 
@@ -366,6 +381,13 @@ export async function getPortfolioDashboardData(userId: string): Promise<Portfol
     }))
     .sort((a, b) => b.value - a.value)
 
+  const workspaceUpdatedAt = latestIsoTimestamp([
+    investment.updated_at,
+    cashRow?.updated_at ?? null,
+    userSettings.updated_at,
+    ...holdings.map((holding) => holding.updated_at),
+  ])
+
   return {
     portfolio: investment,
     watchlist,
@@ -374,6 +396,8 @@ export async function getPortfolioDashboardData(userId: string): Promise<Portfol
     totalValue,
     sectorAllocations,
     userSettings,
+    dashboardGeneratedAt,
+    workspaceUpdatedAt,
   }
 }
 

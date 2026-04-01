@@ -37,9 +37,9 @@ export default function Navbar() {
         />
         <span
           style={{
-            fontWeight: 700,
+            fontWeight: 650,
             color: 'var(--text)',
-            letterSpacing: '-0.05em',
+            letterSpacing: '-0.03em',
             fontSize: 20,
           }}
         >
@@ -56,10 +56,11 @@ export default function Navbar() {
       >
         <span
           style={{
-            fontSize: 11,
-            color: 'var(--text-dim)',
-            letterSpacing: '0.14em',
+            fontSize: 12,
+            color: 'color-mix(in srgb, var(--text-muted) 88%, white 12%)',
+            letterSpacing: '0.16em',
             textTransform: 'uppercase',
+            fontWeight: 600,
           }}
         >
           Intelligence Layer

@@ -116,9 +116,10 @@ function FundamentalsCell({
         style={{
           fontSize: 11,
           color: 'var(--text-dim)',
-          letterSpacing: '0.14em',
+          letterSpacing: 'var(--type-eyebrow-tracking)',
           textTransform: 'uppercase',
           marginBottom: 8,
+          fontWeight: 650,
         }}
       >
         {label}
@@ -126,9 +127,9 @@ function FundamentalsCell({
       <div
         style={{
           fontSize: 20,
-          fontWeight: 700,
+          fontWeight: 650,
           color: accent ? 'var(--purple)' : 'var(--text)',
-          letterSpacing: '-0.04em',
+          letterSpacing: '-0.025em',
           fontFamily: 'var(--font-dm-mono, monospace)',
         }}
       >
@@ -225,9 +226,9 @@ export default async function StockPage({
                   padding: '5px 12px',
                   borderRadius: 999,
                   fontSize: 12,
-                  fontWeight: 700,
+                  fontWeight: 650,
                   fontFamily: 'var(--font-dm-mono, monospace)',
-                  letterSpacing: '0.16em',
+                  letterSpacing: '0.14em',
                 }}
               >
                 {upper}
@@ -246,11 +247,11 @@ export default async function StockPage({
               <span
                 style={{
                   fontSize: 'clamp(42px, 6vw, 64px)',
-                  fontWeight: 700,
+                  fontWeight: 650,
                   fontFamily: 'var(--font-dm-mono, monospace)',
                   color: 'var(--text)',
-                  letterSpacing: '-0.05em',
-                  lineHeight: 1,
+                  letterSpacing: '-0.03em',
+                  lineHeight: 'var(--type-display-line-height)',
                 }}
               >
                 ${formatPrice(quote.price)}
@@ -349,9 +350,9 @@ export default async function StockPage({
                   style={{
                     fontSize: 11,
                     color: 'var(--purple)',
-                    letterSpacing: '0.16em',
+                    letterSpacing: 'var(--type-eyebrow-tracking)',
                     textTransform: 'uppercase',
-                    fontWeight: 700,
+                    fontWeight: 650,
                   }}
                 >
                   Fundamentals
@@ -360,7 +361,9 @@ export default async function StockPage({
                   style={{
                     margin: '10px 0 6px',
                     fontSize: 'clamp(28px, 4vw, 40px)',
-                    letterSpacing: '-0.05em',
+                    letterSpacing: 'var(--type-title-tracking)',
+                    lineHeight: 'var(--type-title-line-height)',
+                    fontWeight: 650,
                   }}
                 >
                   {fundamentals.name}
@@ -370,7 +373,7 @@ export default async function StockPage({
                     margin: 0,
                     color: 'var(--text-muted)',
                     fontSize: 14,
-                    lineHeight: 1.8,
+                    lineHeight: 'var(--type-body-line-height)',
                     maxWidth: 720,
                   }}
                 >

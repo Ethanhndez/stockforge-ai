@@ -22,9 +22,10 @@ export function ResearchPostureCard({ posture }: { posture: ResearchPosture }) {
           <div
             style={{
               fontSize: 11,
-              letterSpacing: '0.16em',
+              letterSpacing: 'var(--type-eyebrow-tracking)',
               textTransform: 'uppercase',
               color: 'rgba(255,255,255,0.62)',
+              fontWeight: 650,
             }}
           >
             Research Briefing
@@ -33,8 +34,9 @@ export function ResearchPostureCard({ posture }: { posture: ResearchPosture }) {
             style={{
               margin: '8px 0 0',
               fontSize: 28,
-              fontWeight: 700,
-              letterSpacing: '-0.05em',
+              fontWeight: 650,
+              letterSpacing: 'var(--type-title-tracking)',
+              lineHeight: 'var(--type-title-line-height)',
               color: 'white',
             }}
           >

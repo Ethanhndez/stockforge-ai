@@ -30,10 +30,10 @@ export default function NotFoundPage() {
           <div
             style={{
               fontSize: 11,
-              letterSpacing: '0.16em',
+              letterSpacing: 'var(--type-eyebrow-tracking)',
               textTransform: 'uppercase',
               color: 'var(--purple)',
-              fontWeight: 700,
+              fontWeight: 650,
             }}
           >
             Signal Lost
@@ -42,8 +42,9 @@ export default function NotFoundPage() {
             style={{
               margin: '14px 0 10px',
               fontSize: 'clamp(44px, 8vw, 78px)',
-              lineHeight: 0.92,
-              letterSpacing: '-0.08em',
+              lineHeight: 'var(--type-display-line-height)',
+              letterSpacing: 'var(--type-display-tracking)',
+              fontWeight: 650,
             }}
           >
             Ticker not found.
@@ -54,7 +55,7 @@ export default function NotFoundPage() {
               maxWidth: 520,
               color: 'var(--text-muted)',
               fontSize: 16,
-              lineHeight: 1.8,
+              lineHeight: 'var(--type-body-line-height)',
             }}
           >
             The page you asked for doesn’t exist, or the symbol isn’t available

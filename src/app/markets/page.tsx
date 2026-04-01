@@ -104,9 +104,9 @@ export default function MarketsPage() {
               style={{
                 fontSize: 11,
                 color: 'var(--purple)',
-                letterSpacing: '0.16em',
+                letterSpacing: 'var(--type-eyebrow-tracking)',
                 textTransform: 'uppercase',
-                fontWeight: 700,
+                fontWeight: 650,
               }}
             >
               Daily market briefing
@@ -115,8 +115,9 @@ export default function MarketsPage() {
               style={{
                 margin: '10px 0 10px',
                 fontSize: 'clamp(38px, 6vw, 62px)',
-                letterSpacing: '-0.07em',
-                lineHeight: 0.92,
+                letterSpacing: 'var(--type-display-tracking)',
+                lineHeight: 'var(--type-display-line-height)',
+                fontWeight: 650,
                 maxWidth: 620,
               }}
             >
@@ -128,7 +129,7 @@ export default function MarketsPage() {
                 maxWidth: 620,
                 color: 'var(--text-muted)',
                 fontSize: 15,
-                lineHeight: 1.8,
+                lineHeight: 'var(--type-body-line-height)',
               }}
             >
               Use this page for the fast market read: broad headlines first,
